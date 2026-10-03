@@ -40,6 +40,7 @@ The game opens on the **main menu**:
 | Mouse | Look around |
 | Shift | Sprint |
 | Space | Jump / swim up |
+| E / left click (hold) | Chop, mine or pick what's in front of you |
 | I / Tab | Open or close the inventory |
 | F5 | Quick save |
 | Esc | Pause menu (resume, settings, save, quit) |
@@ -71,12 +72,35 @@ Worn items show on your character and add up to your stats. Speed and jump
 bonuses already work. Armor is counted, but there's nothing to fight yet. A new
 world starts with a starter kit. To add your own items, edit `scripts/items.gd`.
 
+## Gathering resources
+
+Walk up to a tree, rock, ore deposit or berry bush and hold **E** (or the left
+mouse button). A label shows what you're aiming at and how close it is to
+breaking. Every hit gives you something, with a bonus when it breaks.
+Bottom right lists what you picked up.
+
+| Find it | What it looks like | You get |
+| --- | --- | --- |
+| Oak / pine trees | Everywhere on dry land | Wood (oaks sometimes drop apples) |
+| Rocks | Grey boulders | Stone |
+| Coal | Boulder with black lumps, anywhere | Coal, stone |
+| Copper | Orange lumps, lowlands and hills | Copper ore, stone |
+| Iron | Rusty lumps, more common on hills | Iron ore, stone |
+| Gold | Yellow lumps, high in the mountains only | Gold ore, stone |
+| Crystals | Pale blue spikes near the snowy peaks | Crystal |
+| Berry bushes | Small bushes with red berries, near forests | Berries |
+
+Ore deposits come in clusters, and there are more the higher you climb.
+Harvested things grow back after 5–50 minutes (even while the game is
+closed). To change what drops, how many hits things take or how fast they
+regrow, edit `scripts/harvestables.gd`.
+
 ## Saving
 
 Every world has its own save. The game saves automatically every 30 seconds,
 when you quit through the pause menu, and when you close the window. It
-remembers where you are, which way you're looking, the time of day and your
-inventory.
+remembers where you are, which way you're looking, the time of day, your
+inventory, and what you've harvested that hasn't grown back yet.
 
 Saves live in `%APPDATA%\Godot\app_userdata\Nelbrenn\worlds\` (one `.json`
 file per world) and settings in `settings.cfg` next to that folder. A save
@@ -95,7 +119,9 @@ from before multiple worlds existed is moved in automatically as
 | `scripts/settings.gd` | All settings and key bindings (an autoload, so every script can use `Settings`) |
 | `scripts/settings_menu.gd` | The settings screen, shared by the main and pause menus |
 | `scripts/ui.gd` | Shared menu look (colours, buttons, panels) |
-| `scripts/world.gd` | Terrain shape and colours, chunk streaming, trees, rocks and water |
+| `scripts/world.gd` | Terrain shape and colours, chunk streaming, trees, rocks, ores, bushes and water |
+| `scripts/harvestables.gd` | What every tree, rock and ore drops, how many hits it takes, regrow times |
+| `scripts/gathering.gd` | Chopping and mining: aiming, the on-screen prompt, pickups and sounds |
 | `scripts/player.gd` | Player movement, swimming and the third-person camera |
 | `scripts/day_night.gd` | Sun movement and sky colours over the day |
 | `scripts/ambience.gd` | Wind sound, made in code, louder up high |

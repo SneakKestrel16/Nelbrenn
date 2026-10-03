@@ -3,6 +3,7 @@ extends Node3D
 ## player from noise, so the same seed always gives the same world.
 
 const LowPoly := preload("res://scripts/low_poly.gd")
+const Harvestables := preload("res://scripts/harvestables.gd")
 
 const CHUNK_SIZE := 48.0          ## Width of one chunk in metres.
 const CHUNK_RES := 24             ## Quads per chunk side (2 m per quad).
@@ -36,6 +37,7 @@ var _forest := FastNoiseLite.new()
 var _warp := FastNoiseLite.new()     ## Bends the other noises so shapes look less blobby.
 var _detail := FastNoiseLite.new()   ## Small bumps and colour speckle.
 var _patches := FastNoiseLite.new()  ## Large soft patches of drier or greener ground.
+var _ore := FastNoiseLite.new()      ## Where ore deposits cluster together.
 
 var _chunks := {}                 ## Vector2i -> Node3D
 var _queue: Array[Vector2i] = []
@@ -45,6 +47,12 @@ var _terrain_material: StandardMaterial3D  ## Trees and rocks.
 var _ground_material: StandardMaterial3D
 var _water: MeshInstance3D
 var _prop_meshes := {}            ## name -> ArrayMesh
+var _chip_mesh: BoxMesh
+
+var _resources := {}              ## Vector2i -> Array of harvestable nodes in that chunk
+var _resource_by_id := {}         ## node id -> node, for loaded chunks
+var _harvested := {}              ## node id -> unix time it grows back (saved)
+var _regrow_timer := 0.0
 
 
 func _ready() -> void:
@@ -76,13 +84,22 @@ func _ready() -> void:
 	_patches.frequency = 0.012
 	_patches.fractal_octaves = 2
 
+	_ore.seed = world_seed + 7
+	_ore.frequency = 0.02
+
 	_terrain_material = LowPoly.make_material()
 	_ground_material = _make_ground_material()
+	_chip_mesh = BoxMesh.new()
+	_chip_mesh.size = Vector3.ONE * 0.14
 	_build_prop_meshes()
 	_build_water()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_regrow_timer -= delta
+	if _regrow_timer <= 0.0:
+		_regrow_timer = 2.0
+		_regrow()
 	if target == null:
 		return
 	_water.global_position = Vector3(target.global_position.x, WATER_LEVEL, target.global_position.z)
@@ -124,6 +141,9 @@ func generate_around(pos: Vector3, immediate: bool) -> void:
 		if _chunk_distance(coord, center) > view_radius + 1:
 			_chunks[coord].queue_free()
 			_chunks.erase(coord)
+			for node in _resources.get(coord, []):
+				_resource_by_id.erase(node["id"])
+			_resources.erase(coord)
 
 	_queue.clear()
 	for x in range(-view_radius, view_radius + 1):
@@ -287,11 +307,13 @@ func _make_ground_material() -> StandardMaterial3D:
 	mat.uv1_scale = Vector3.ONE * 0.08
 	return mat
 
+## Trees, rocks, ore deposits and berry bushes. Each one is a harvestable
+## "node" (see harvestables.gd); they're drawn with one MultiMesh per kind.
 func _build_props(chunk: Node3D, body: StaticBody3D, coord: Vector2i) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(Vector3i(coord.x, coord.y, world_seed))
 
-	var transforms := {"pine": [], "oak": [], "rock": []}
+	var nodes: Array = []
 	for i in 40:
 		var lx := rng.randf() * CHUNK_SIZE
 		var lz := rng.randf() * CHUNK_SIZE
@@ -301,36 +323,126 @@ func _build_props(chunk: Node3D, body: StaticBody3D, coord: Vector2i) -> void:
 		var slope := absf(get_height(wx + 1.0, wz) - h) + absf(get_height(wx, wz + 1.0) - h)
 		var roll := rng.randf()
 		var basis := Basis(Vector3.UP, rng.randf() * TAU)
+		var id := "%d_%d_%d" % [coord.x, coord.y, i]
 
 		if h > WATER_LEVEL + 2.0 and h < 38.0 and slope < 0.9:
 			var forest := _forest.get_noise_2d(wx, wz)
 			if roll < 0.15 + forest * 0.6:
 				var kind := "pine" if h > 16.0 or forest > 0.3 else "oak"
 				var s := rng.randf_range(0.8, 1.4)
-				transforms[kind].append(Transform3D(basis.scaled(Vector3.ONE * s), Vector3(lx, h - 0.2, lz)))
-				_add_trunk_collider(body, Vector3(lx, h, lz), s)
+				var node := _make_node(id, kind, chunk, Transform3D(basis.scaled(Vector3.ONE * s), Vector3(lx, h - 0.2, lz)), 0.35 * s)
+				node["collider"] = _add_trunk_collider(body, Vector3(lx, h, lz), s)
+				node["tree"] = true
+				nodes.append(node)
 				continue
 		if h > WATER_LEVEL - 1.0 and roll > 0.93:
 			var s := rng.randf_range(0.5, 2.0)
-			transforms["rock"].append(Transform3D(basis.scaled(Vector3(s, s * 0.7, s)), Vector3(lx, h - 0.2, lz)))
+			nodes.append(_make_node(id, "rock", chunk, Transform3D(basis.scaled(Vector3(s, s * 0.7, s)), Vector3(lx, h - 0.2, lz)), s))
 
-	for kind in transforms:
-		var list: Array = transforms[kind]
-		if list.is_empty():
-			continue
+	_add_ores_and_bushes(chunk, coord, nodes)
+
+	var by_kind := {}
+	for node in nodes:
+		if not by_kind.has(node["kind"]):
+			by_kind[node["kind"]] = []
+		by_kind[node["kind"]].append(node)
+	for kind in by_kind:
+		var list: Array = by_kind[kind]
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
 		mm.mesh = _prop_meshes[kind]
 		mm.instance_count = list.size()
 		for i in list.size():
-			mm.set_instance_transform(i, list[i])
+			var node: Dictionary = list[i]
+			node["mm"] = mm
+			node["index"] = i
+			if _harvested.has(node["id"]):  # Still regrowing since it was harvested.
+				node["alive"] = false
+				if node["collider"]:
+					node["collider"].disabled = true
+			_set_instance(node, node["xform"] if node["alive"] else _hidden(node))
 		var mmi := MultiMeshInstance3D.new()
 		mmi.multimesh = mm
 		mmi.material_override = _terrain_material
 		chunk.add_child(mmi)
 
+	_resources[coord] = nodes
+	for node in nodes:
+		_resource_by_id[node["id"]] = node
 
-func _add_trunk_collider(body: StaticBody3D, pos: Vector3, s: float) -> void:
+
+## Ore deposits (more of them up in the hills and mountains, and in clusters)
+## and berry bushes. They use their own random numbers so the trees and rocks
+## of existing worlds stay exactly where they were.
+func _add_ores_and_bushes(chunk: Node3D, coord: Vector2i, nodes: Array) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(Vector3i(coord.x, coord.y, world_seed + 7))
+	for i in 12:
+		var lx := rng.randf() * CHUNK_SIZE
+		var lz := rng.randf() * CHUNK_SIZE
+		var roll := rng.randf()
+		var pick := rng.randf()
+		var s := rng.randf_range(0.8, 1.25)
+		var basis := Basis(Vector3.UP, rng.randf() * TAU)
+		var h := get_height(chunk.position.x + lx, chunk.position.z + lz)
+		if h < WATER_LEVEL + 3.0:
+			continue
+		var vein := _ore.get_noise_2d(chunk.position.x + lx, chunk.position.z + lz)
+		var chance := 0.03 + maxf(vein, 0.0) * 0.35 + smoothstep(15.0, 45.0, h) * 0.12
+		if roll > chance:
+			continue
+		var kind := _pick_ore(h, pick)
+		var id := "%d_%d_o%d" % [coord.x, coord.y, i]
+		nodes.append(_make_node(id, kind, chunk, Transform3D(basis.scaled(Vector3.ONE * s), Vector3(lx, h - 0.15, lz)), 0.9 * s))
+
+	for i in 6:
+		var lx := rng.randf() * CHUNK_SIZE
+		var lz := rng.randf() * CHUNK_SIZE
+		var roll := rng.randf()
+		var s := rng.randf_range(0.8, 1.2)
+		var basis := Basis(Vector3.UP, rng.randf() * TAU)
+		var wx := chunk.position.x + lx
+		var wz := chunk.position.z + lz
+		var h := get_height(wx, wz)
+		var slope := absf(get_height(wx + 1.0, wz) - h) + absf(get_height(wx, wz + 1.0) - h)
+		if h < WATER_LEVEL + 2.0 or h > 30.0 or slope > 0.6:
+			continue
+		if roll > 0.08 + maxf(_forest.get_noise_2d(wx, wz), 0.0) * 0.3:
+			continue
+		var id := "%d_%d_b%d" % [coord.x, coord.y, i]
+		nodes.append(_make_node(id, "berry_bush", chunk, Transform3D(basis.scaled(Vector3.ONE * s), Vector3(lx, h - 0.1, lz)), 0.8 * s))
+
+
+## Which ore appears at height `h`: coal and copper everywhere, iron on hills,
+## gold and crystals only high in the mountains. `pick` is a random 0..1.
+func _pick_ore(h: float, pick: float) -> String:
+	var weights := {
+		"coal": 5.0,
+		"copper": 3.0 if h > 6.0 else 0.0,
+		"iron": 2.0 + smoothstep(20.0, 40.0, h) * 3.0 if h > 12.0 else 0.0,
+		"gold": 1.2 if h > 28.0 else 0.0,
+		"crystal": 1.0 if h > 42.0 else 0.0,
+	}
+	var total := 0.0
+	for kind in weights:
+		total += weights[kind]
+	pick *= total
+	for kind in weights:
+		pick -= weights[kind]
+		if pick <= 0.0:
+			return kind
+	return "coal"
+
+
+func _make_node(id: String, kind: String, chunk: Node3D, xform: Transform3D, radius: float) -> Dictionary:
+	return {
+		"id": id, "kind": kind, "xform": xform, "radius": radius,
+		"pos": chunk.position + xform.origin, "hp": Harvestables.get_info(kind)["hits"],
+		"alive": true, "tree": false, "collider": null, "mm": null, "index": 0, "tween": null,
+	}
+
+
+func _add_trunk_collider(body: StaticBody3D, pos: Vector3, s: float) -> CollisionShape3D:
 	var shape := CylinderShape3D.new()
 	shape.radius = 0.35 * s
 	shape.height = 4.0 * s
@@ -338,6 +450,149 @@ func _add_trunk_collider(body: StaticBody3D, pos: Vector3, s: float) -> void:
 	collision.shape = shape
 	collision.position = pos + Vector3(0, shape.height * 0.5, 0)
 	body.add_child(collision)
+	return collision
+
+
+# --- Harvesting -------------------------------------------------------------
+
+## The harvestable thing the player at `from`, looking along `forward`, can
+## reach; prefers close things straight ahead. Returns {} if there's nothing.
+func find_resource(from: Vector3, forward: Vector3, reach: float) -> Dictionary:
+	var center := _chunk_coord(from)
+	var best := {}
+	var best_score := INF
+	for dx in range(-1, 2):
+		for dz in range(-1, 2):
+			for node in _resources.get(center + Vector2i(dx, dz), []):
+				if not node["alive"] or absf(node["pos"].y - from.y) > 3.0:
+					continue
+				var to: Vector3 = node["pos"] - from
+				to.y = 0.0
+				var dist: float = to.length() - node["radius"]
+				if dist > reach:
+					continue
+				var facing := forward.dot(to.normalized()) if to.length() > 0.01 else 1.0
+				if facing < 0.2 and dist > 0.5:
+					continue
+				var score := dist - facing * 1.5
+				if score < best_score:
+					best_score = score
+					best = node
+	return best
+
+
+## One hit on `node` from a player standing at `from`. Returns true if it broke.
+func hit_resource(node: Dictionary, from: Vector3) -> bool:
+	var info := Harvestables.get_info(node["kind"])
+	node["hp"] -= 1
+	spawn_chips(node["pos"] + Vector3.UP * (1.2 if node["tree"] else 0.5), info["chips"])
+	if node["hp"] > 0:
+		_animate(node, "shake", from)
+		return false
+	node["alive"] = false
+	_harvested[node["id"]] = Time.get_unix_time_from_system() + float(info["regrow"])
+	if node["collider"]:
+		node["collider"].set_deferred("disabled", true)
+	_animate(node, "fall" if node["tree"] else "shrink", from)
+	return true
+
+
+## A little burst of chips flying off something you hit.
+func spawn_chips(pos: Vector3, color: Color, amount := 8) -> void:
+	var p := CPUParticles3D.new()
+	p.one_shot = true
+	p.amount = amount
+	p.lifetime = 0.8
+	p.explosiveness = 1.0
+	p.mesh = _chip_mesh
+	p.material_override = _terrain_material
+	p.direction = Vector3.UP
+	p.spread = 70.0
+	p.initial_velocity_min = 2.5
+	p.initial_velocity_max = 5.0
+	p.gravity = Vector3(0, -14.0, 0)
+	p.scale_amount_min = 0.6
+	p.scale_amount_max = 1.3
+	p.color = color
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(p)
+	p.global_position = pos
+	p.finished.connect(p.queue_free)
+	p.emitting = true
+
+
+func get_save_data() -> Dictionary:
+	return {"harvested": _harvested.duplicate()}
+
+
+func apply_save_data(data: Dictionary) -> void:
+	_harvested.clear()
+	var saved = data.get("harvested", {})
+	if saved is Dictionary:
+		for id in saved:
+			_harvested[String(id)] = float(saved[id])
+
+
+## Grows back things whose regrow time has passed.
+func _regrow() -> void:
+	var now := Time.get_unix_time_from_system()
+	for id in _harvested.keys():
+		if _harvested[id] > now:
+			continue
+		_harvested.erase(id)
+		var node = _resource_by_id.get(id)
+		if node != null and not node["alive"]:
+			node["alive"] = true
+			node["hp"] = Harvestables.get_info(node["kind"])["hits"]
+			if node["collider"]:
+				node["collider"].set_deferred("disabled", false)
+			_animate(node, "grow", Vector3.ZERO)
+
+
+func _animate(node: Dictionary, how: String, from: Vector3) -> void:
+	if node["tween"]:
+		node["tween"].kill()
+	var xf: Transform3D = node["xform"]
+	var tween := create_tween()
+	node["tween"] = tween
+	match how:
+		"shake":
+			var axis := Vector3(randf() - 0.5, 0.0, randf() - 0.5).normalized()
+			var shake := func(f: float) -> void:
+				var wobble := sin(f * TAU * 2.0) * (1.0 - f)
+				if node["tree"]:
+					_set_instance(node, Transform3D(Basis(axis, wobble * 0.06) * xf.basis, xf.origin))
+				else:
+					_set_instance(node, Transform3D(xf.basis.scaled(Vector3.ONE * (1.0 - absf(wobble) * 0.1)), xf.origin))
+			tween.tween_method(shake, 0.0, 1.0, 0.3)
+		"fall":  # Tip over away from the player, then sink away.
+			var away: Vector3 = node["pos"] - from
+			away.y = 0.0
+			away = away.normalized() if away.length() > 0.01 else Vector3.FORWARD
+			var axis := Vector3.UP.cross(away).normalized()
+			var tip := func(f: float) -> void:
+				_set_instance(node, Transform3D(Basis(axis, f * PI * 0.47) * xf.basis, xf.origin))
+			var sink := func(f: float) -> void:
+				_set_instance(node, Transform3D(Basis(axis, PI * 0.47) * xf.basis.scaled(Vector3.ONE * f), xf.origin))
+			tween.tween_method(tip, 0.0, 1.0, 0.9).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+			tween.tween_method(sink, 1.0, 0.0, 0.4)
+		"shrink", "grow":
+			var resize := func(f: float) -> void:
+				_set_instance(node, Transform3D(xf.basis.scaled(Vector3.ONE * maxf(f, 0.0)), xf.origin))
+			if how == "shrink":
+				tween.tween_method(resize, 1.0, 0.0, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+			else:
+				tween.tween_method(resize, 0.0, 1.0, 1.0).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
+func _set_instance(node: Dictionary, xform: Transform3D) -> void:
+	node["mm"].set_instance_transform(node["index"], xform)
+
+
+## Harvested things are squashed to nothing rather than removed, so the
+## MultiMesh doesn't need rebuilding.
+func _hidden(node: Dictionary) -> Transform3D:
+	return Transform3D(Basis.from_scale(Vector3.ZERO), node["xform"].origin)
 
 
 func _build_prop_meshes() -> void:
@@ -362,6 +617,44 @@ func _build_prop_meshes() -> void:
 	rock.begin(Mesh.PRIMITIVE_TRIANGLES)
 	LowPoly.add_blob(rock, 1.0, Vector3(0, 0.3, 0), Color(0.55, 0.53, 0.50), 21)
 	_prop_meshes["rock"] = rock.commit()
+
+	# Ore deposits: a dark boulder studded with lumps of the ore's colour.
+	var ore_colors := {
+		"coal": Color(0.10, 0.10, 0.11), "copper": Color(0.85, 0.50, 0.25),
+		"iron": Color(0.78, 0.52, 0.42), "gold": Color(1.0, 0.82, 0.25),
+	}
+	for kind in ore_colors:
+		var ore := SurfaceTool.new()
+		ore.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var middle := Vector3(0, 0.35, 0)
+		LowPoly.add_blob(ore, 0.9, middle, Color(0.42, 0.40, 0.38), 31)
+		var rng := RandomNumberGenerator.new()
+		rng.seed = 77
+		for j in 7:
+			var dir := Vector3(rng.randf_range(-1.0, 1.0), rng.randf_range(0.1, 1.0), rng.randf_range(-1.0, 1.0)).normalized()
+			LowPoly.add_blob(ore, rng.randf_range(0.18, 0.28), middle + dir * 0.82, ore_colors[kind], 40 + j)
+		_prop_meshes[kind] = ore.commit()
+
+	# Crystals: pale spikes growing out of a small rock.
+	var crystal := SurfaceTool.new()
+	crystal.begin(Mesh.PRIMITIVE_TRIANGLES)
+	LowPoly.add_blob(crystal, 0.6, Vector3(0, 0.1, 0), Color(0.42, 0.40, 0.38), 33)
+	for spike in [[0.0, 0.0, 0.22, 1.6], [0.35, 0.15, 0.16, 1.1], [-0.3, 0.2, 0.15, 0.9], [0.1, -0.35, 0.14, 1.0]]:
+		var tint := Color(0.55, 0.85, 0.95).lerp(Color(0.75, 0.6, 0.95), absf(spike[0]) * 2.0)
+		LowPoly.add_cylinder(crystal, 0.0, spike[2], spike[3], 5, Vector3(spike[0], 0.3 + spike[3] * 0.5, spike[1]), tint)
+	_prop_meshes["crystal"] = crystal.commit()
+
+	# Berry bush: two green puffs dotted with red berries.
+	var bush := SurfaceTool.new()
+	bush.begin(Mesh.PRIMITIVE_TRIANGLES)
+	LowPoly.add_blob(bush, 0.75, Vector3(0, 0.55, 0), Color(0.24, 0.50, 0.22), 51)
+	LowPoly.add_blob(bush, 0.55, Vector3(0.5, 0.45, 0.3), Color(0.28, 0.55, 0.24), 52)
+	var berry_rng := RandomNumberGenerator.new()
+	berry_rng.seed = 53
+	for j in 9:
+		var dir := Vector3(berry_rng.randf_range(-1.0, 1.0), berry_rng.randf_range(0.0, 1.0), berry_rng.randf_range(-1.0, 1.0)).normalized()
+		LowPoly.add_blob(bush, 0.1, Vector3(0, 0.55, 0) + dir * 0.75, Color(0.80, 0.12, 0.22), 60 + j)
+	_prop_meshes["berry_bush"] = bush.commit()
 
 
 func _build_water() -> void:

@@ -65,9 +65,38 @@ const ITEMS := {
 		"name": "Apple", "slot": "", "icon": "round", "color": Color(0.85, 0.20, 0.15),
 		"max_stack": 20, "description": "Crunchy and sweet.",
 	},
+	"berries": {
+		"name": "Berries", "slot": "", "icon": "berries", "color": Color(0.80, 0.12, 0.22),
+		"max_stack": 30, "description": "Picked from a berry bush.",
+	},
+	# --- Materials (gathered in the world) ---
+	"wood": {
+		"name": "Wood", "slot": "", "icon": "log", "color": Color(0.58, 0.40, 0.22),
+		"max_stack": 50, "description": "Chopped from trees.",
+	},
 	"stone": {
 		"name": "Stone", "slot": "", "icon": "rock", "color": Color(0.55, 0.55, 0.55),
-		"max_stack": 50, "description": "Could be useful for building one day.",
+		"max_stack": 50, "description": "Mined from rocks. Could be useful for building one day.",
+	},
+	"coal": {
+		"name": "Coal", "slot": "", "icon": "lump", "color": Color(0.16, 0.16, 0.18),
+		"max_stack": 50, "description": "Burns hot. Found in dark-speckled boulders.",
+	},
+	"copper_ore": {
+		"name": "Copper Ore", "slot": "", "icon": "ore", "color": Color(0.85, 0.50, 0.25),
+		"max_stack": 50, "description": "Orange-flecked rock from the lowlands and hills.",
+	},
+	"iron_ore": {
+		"name": "Iron Ore", "slot": "", "icon": "ore", "color": Color(0.78, 0.52, 0.42),
+		"max_stack": 50, "description": "Rusty-looking rock, common in the hills.",
+	},
+	"gold_ore": {
+		"name": "Gold Ore", "slot": "", "icon": "ore", "color": Color(1.0, 0.82, 0.25),
+		"max_stack": 50, "description": "Glittering rock from high in the mountains.",
+	},
+	"crystal": {
+		"name": "Crystal", "slot": "", "icon": "gem", "color": Color(0.55, 0.85, 0.95),
+		"max_stack": 30, "description": "A clear crystal from the snowy peaks.",
 	},
 }
 

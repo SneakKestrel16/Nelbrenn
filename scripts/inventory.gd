@@ -112,6 +112,18 @@ func add_item(id: String, count := 1) -> int:
 	return count
 
 
+## How many more of `id` fit in the bag.
+func room_for(id: String) -> int:
+	var limit := Items.max_stack(id)
+	var room := 0
+	for entry in bag:
+		if entry == null:
+			room += limit
+		elif entry["id"] == id:
+			room += limit - entry["count"]
+	return room
+
+
 func equip_new(id: String) -> void:
 	var slot: String = Items.get_info(id).get("slot", "")
 	var target := slot if equipment.has(slot) else slot + "_1"

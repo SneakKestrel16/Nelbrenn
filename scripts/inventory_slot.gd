@@ -163,5 +163,29 @@ static func draw_icon(canvas: CanvasItem, id: String, placeholder: String, rect:
 		"rock":
 			canvas.draw_colored_polygon(p.call([Vector2(0.15, 0.85), Vector2(0.05, 0.5), Vector2(0.3, 0.2),
 					Vector2(0.65, 0.15), Vector2(0.95, 0.45), Vector2(0.85, 0.85)]), color)
+		"lump":
+			canvas.draw_colored_polygon(p.call([Vector2(0.2, 0.85), Vector2(0.08, 0.55), Vector2(0.25, 0.25),
+					Vector2(0.55, 0.18), Vector2(0.9, 0.35), Vector2(0.92, 0.7), Vector2(0.7, 0.9)]), color)
+			canvas.draw_colored_polygon(p.call([Vector2(0.3, 0.35), Vector2(0.5, 0.28), Vector2(0.45, 0.45)]),
+					color.lightened(0.35))
+		"ore":  # Grey rock with flecks of the ore's colour.
+			canvas.draw_colored_polygon(p.call([Vector2(0.15, 0.85), Vector2(0.05, 0.5), Vector2(0.3, 0.2),
+					Vector2(0.65, 0.15), Vector2(0.95, 0.45), Vector2(0.85, 0.85)]), Color(0.45, 0.43, 0.41))
+			for fleck in [Vector2(0.35, 0.4), Vector2(0.65, 0.35), Vector2(0.5, 0.65), Vector2(0.25, 0.68), Vector2(0.75, 0.65)]:
+				canvas.draw_circle(o + fleck * s, 0.09 * s, color)
+		"log":
+			canvas.draw_colored_polygon(p.call([Vector2(0.1, 0.35), Vector2(0.75, 0.35), Vector2(0.75, 0.8),
+					Vector2(0.1, 0.8)]), color)
+			canvas.draw_circle(o + Vector2(0.75, 0.575) * s, 0.225 * s, color.lightened(0.3))
+			canvas.draw_arc(o + Vector2(0.75, 0.575) * s, 0.12 * s, 0.0, TAU, 16, dark, 0.03 * s)
+		"gem":
+			canvas.draw_colored_polygon(p.call([Vector2(0.5, 0.05), Vector2(0.8, 0.35), Vector2(0.5, 0.95),
+					Vector2(0.2, 0.35)]), color)
+			canvas.draw_colored_polygon(p.call([Vector2(0.5, 0.05), Vector2(0.62, 0.35), Vector2(0.5, 0.95),
+					Vector2(0.38, 0.35)]), color.lightened(0.4))
+		"berries":
+			for berry in [Vector2(0.35, 0.6), Vector2(0.65, 0.6), Vector2(0.5, 0.35)]:
+				canvas.draw_circle(o + berry * s, 0.18 * s, color)
+			canvas.draw_line(o + Vector2(0.5, 0.2) * s, o + Vector2(0.62, 0.05) * s, Color(0.3, 0.55, 0.25), 0.06 * s)
 		_:
 			canvas.draw_circle(o + Vector2(0.5, 0.5) * s, 0.3 * s, color)

@@ -10,6 +10,7 @@ const InventoryScript := preload("res://scripts/inventory.gd")
 const InventoryUIScript := preload("res://scripts/inventory_ui.gd")
 const PauseMenuScript := preload("res://scripts/pause_menu.gd")
 const AmbienceScript := preload("res://scripts/ambience.gd")
+const GatheringScript := preload("res://scripts/gathering.gd")
 
 @export var autosave_seconds := 30.0
 
@@ -69,6 +70,8 @@ func _ready() -> void:
 	world.world_seed = world_seed
 	world.view_radius = Settings.get_value("graphics", "view_distance")
 	add_child(world)
+	if save.has("world"):  # Trees and rocks that were harvested and are still growing back.
+		world.apply_save_data(save["world"])
 
 	player = PlayerScript.new()
 	player.name = "Player"
@@ -97,6 +100,14 @@ func _ready() -> void:
 	inventory_ui.inventory = inventory
 	inventory_ui.player = player
 	add_child(inventory_ui)
+
+	var gathering := GatheringScript.new()
+	gathering.name = "Gathering"
+	gathering.world = world
+	gathering.player = player
+	gathering.inventory = inventory
+	gathering.game = self
+	add_child(gathering)
 
 	var ambience := AmbienceScript.new()
 	ambience.name = "Ambience"
@@ -146,6 +157,7 @@ func save_game(announce: bool) -> void:
 		"time_of_day": day_night.time_of_day,
 		"player": player.get_save_data(),
 		"inventory": inventory.get_save_data(),
+		"world": world.get_save_data(),
 		"saved_at": Time.get_datetime_string_from_system(),
 	}, true)
 	var ok: bool = SaveGame.write(world_id, data)

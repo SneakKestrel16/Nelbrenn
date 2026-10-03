@@ -124,6 +124,25 @@ func set_fov(degrees: float) -> void:
 	_camera.fov = degrees
 
 
+func get_camera() -> Camera3D:
+	return _camera
+
+
+## Flat direction the camera looks in.
+func get_look_direction() -> Vector3:
+	return -_camera_yaw.global_basis.z
+
+
+## Turns to face `pos` and leans in for a quick chop / swing.
+func swing_at(pos: Vector3) -> void:
+	var to := pos - global_position
+	if to.length() > 0.01:
+		_model.rotation.y = atan2(-to.x, -to.z)
+	var tween := create_tween()
+	tween.tween_property(_model, "rotation:x", -0.35, 0.08)
+	tween.tween_property(_model, "rotation:x", 0.0, 0.18)
+
+
 func get_save_data() -> Dictionary:
 	return {
 		"position": [global_position.x, global_position.y, global_position.z],

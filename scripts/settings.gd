@@ -29,6 +29,7 @@ const ACTIONS := [
 	["move_right", "Move right", [KEY_D, KEY_RIGHT]],
 	["jump", "Jump / swim up", [KEY_SPACE]],
 	["sprint", "Sprint", [KEY_SHIFT]],
+	["gather", "Gather (or left click)", [KEY_E]],
 	["inventory", "Inventory", [KEY_I, KEY_TAB]],
 	["save_game", "Quick save", [KEY_F5]],
 ]
