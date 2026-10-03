@@ -41,7 +41,8 @@ func _ready() -> void:
 	column.add_child(UI.button("Settings", _open_settings))
 	column.add_child(UI.button("Save Game", func(): game.save_game(true)))
 	column.add_child(UI.button("Save & Quit to Main Menu", _quit_to_menu))
-	column.add_child(UI.button("Save & Quit to Desktop", _quit_to_desktop))
+	if not OS.has_feature("web"):  # A browser tab can't quit itself.
+		column.add_child(UI.button("Save & Quit to Desktop", _quit_to_desktop))
 
 	_settings = SettingsMenuScript.new()
 	_settings.visible = false

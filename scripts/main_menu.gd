@@ -8,6 +8,9 @@ const WorldScript := preload("res://scripts/world.gd")
 const DayNightScript := preload("res://scripts/day_night.gd")
 const SettingsMenuScript := preload("res://scripts/settings_menu.gd")
 const GAME_SCENE := "res://scenes/game.tscn"
+## Where the downloadable game is published. Released builds check it for updates.
+const RELEASES_API := "https://api.github.com/repos/SneakKestrel16/Nelbrenn/releases/latest"
+const RELEASES_PAGE := "https://github.com/SneakKestrel16/Nelbrenn/releases/latest"
 
 var _world  # world.gd
 var _camera: Camera3D
@@ -24,6 +27,7 @@ var _name_edit: LineEdit
 var _seed_edit: LineEdit
 var _settings: Control
 var _confirm: ConfirmationDialog
+var _update_button: Button
 var _pending_delete := ""
 
 
@@ -33,6 +37,7 @@ func _ready() -> void:
 	_build_background()
 	_build_ui()
 	_show_page("main")
+	_check_for_update()
 
 
 func _process(delta: float) -> void:
@@ -174,11 +179,25 @@ func _build_ui() -> void:
 
 	# Main page
 	var main := _new_page("main")
+	_update_button = UI.button("Update available!", func(): OS.shell_open(RELEASES_PAGE))
+	_update_button.add_theme_color_override("font_color", UI.HIGHLIGHT_COLOR)
+	_update_button.visible = false
+	main.add_child(_update_button)
 	_continue_button = UI.button("Continue", func(): _play(_continue_button.get_meta("world_id")))
 	main.add_child(_continue_button)
 	main.add_child(UI.button("Worlds", _show_page.bind("worlds")))
 	main.add_child(UI.button("Settings", _show_page.bind("settings")))
-	main.add_child(UI.button("Quit", _quit))
+	if not OS.has_feature("web"):  # A browser tab can't quit itself.
+		main.add_child(UI.button("Quit", _quit))
+
+	var version := UI.label(_version(), 15)
+	version.modulate = UI.SOFT_TEXT_COLOR
+	version.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	version.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	version.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	version.offset_right = -12.0
+	version.offset_bottom = -8.0
+	_ui.add_child(version)
 
 	# World list
 	var worlds := _new_page("worlds")
@@ -249,6 +268,38 @@ func _new_page(page_name: String) -> VBoxContainer:
 		# Sit a little below the centre, under the big title.
 		column.get_parent().get_parent().offset_top = 140.0
 	return column
+
+
+## "build-12" for published builds (set by the GitHub build), "dev" when run from the editor.
+static func _version() -> String:
+	var version: String = ProjectSettings.get_setting("application/config/version", "")
+	return version if version != "" else "dev"
+
+
+static func _build_number(version: String) -> int:
+	return version.trim_prefix("build-").to_int() if version.begins_with("build-") else 0
+
+
+## Downloaded builds ask GitHub for the newest release and offer it if it's newer.
+## (The browser version is always the newest, so it doesn't need to check.)
+func _check_for_update() -> void:
+	var current := _build_number(_version())
+	if current == 0 or OS.has_feature("web"):
+		return
+	var request := HTTPRequest.new()
+	add_child(request)
+	request.request_completed.connect(func(result: int, code: int, _headers, body: PackedByteArray) -> void:
+		request.queue_free()
+		if result != HTTPRequest.RESULT_SUCCESS or code != 200:
+			return
+		var data = JSON.parse_string(body.get_string_from_utf8())
+		if data is Dictionary:
+			var latest := String(data.get("tag_name", ""))
+			if _build_number(latest) > current:
+				_update_button.text = "Update available (%s) - Download" % latest
+				_update_button.visible = true
+	)
+	request.request(RELEASES_API, ["User-Agent: Nelbrenn"])
 
 
 func _quit() -> void:

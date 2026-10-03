@@ -7,7 +7,20 @@ rolling grassland, forests, beaches, lakes and snowy mountains, with a full
 day/night cycle. The ground is smooth-shaded with soft blends between sand,
 grass, forest floor, rock and snow; trees and rocks keep the low-poly style.
 
-## Playing
+## Play it
+
+- **In your browser:** https://sneakkestrel16.github.io/Nelbrenn/
+  (always the newest version, nothing to install; saves stay in that browser)
+- **Windows download:** https://github.com/SneakKestrel16/Nelbrenn/releases/latest/download/Nelbrenn-windows.zip
+  (unzip and run `Nelbrenn.exe`; the main menu shows an "Update available"
+  button when a newer version is out. Windows may warn about an unknown
+  publisher: click **More info → Run anyway**.)
+
+Every push to `main` builds and publishes both automatically
+(`.github/workflows/publish.yml`). The build number is shown in the bottom
+right of the main menu.
+
+## Playing from the source
 
 1. Open Godot, click **Import**, and pick this folder's `project.godot`.
 2. Press **F5** (or the ▶ button) to play.
@@ -91,4 +104,6 @@ from before multiple worlds existed is moved in automatically as
 | `scripts/inventory_ui.gd` | The inventory screen |
 | `scripts/inventory_slot.gd` | One slot in the inventory screen: icons and drag-and-drop |
 | `scripts/save_game.gd` | Reading, writing, listing and deleting world saves |
+| `export_presets.cfg` | Export settings for the browser and Windows builds |
+| `.github/workflows/publish.yml` | Builds and publishes the game on every push |
 | `scripts/low_poly.gd` | Helpers for building flat-shaded low-poly meshes |

@@ -1,0 +1,98 @@
+# Builds the game on every push to main and publishes it:
+#  - the browser version to GitHub Pages (https://sneakkestrel16.github.io/Nelbrenn/)
+#  - the Windows version as a new GitHub release (newest is always at
+#    https://github.com/SneakKestrel16/Nelbrenn/releases/latest)
+name: Build and publish
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+# If several pushes come in quickly, only the newest one gets published.
+concurrency:
+  group: publish
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: 4.7.2
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Godot
+        id: cache-godot
+        uses: actions/cache@v4
+        with:
+          path: ~/godot
+          key: godot-${{ env.GODOT_VERSION }}-web-windows
+
+      - name: Download Godot and export templates
+        if: steps.cache-godot.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/godot && cd ~/godot
+          base="https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-stable"
+          curl -fsSL -o godot.zip "$base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q godot.zip && mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" godot && rm godot.zip
+          curl -fsSL -o templates.tpz "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          unzip -q templates.tpz && rm templates.tpz
+          # Keep only the web and Windows templates so the cache stays small.
+          find templates -type f ! -name 'web_*' ! -name 'windows_*' ! -name 'version.txt' -delete
+
+      - name: Install export templates
+        run: |
+          dest=~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          mkdir -p "$dest"
+          cp ~/godot/templates/* "$dest/"
+
+      - name: Stamp the build number into the game
+        run: |
+          VERSION="build-${{ github.run_number }}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          sed -i "s|^config/name=\"Nelbrenn\"|&\nconfig/version=\"$VERSION\"|" project.godot
+          grep -n 'config/version' project.godot
+
+      - name: Import project
+        run: ~/godot/godot --headless --path . --import
+
+      - name: Export web and Windows builds
+        run: |
+          mkdir -p build/web build/windows
+          ~/godot/godot --headless --path . --export-release "Web" build/web/index.html
+          ~/godot/godot --headless --path . --export-release "Windows Desktop" build/windows/Nelbrenn.exe
+          test -f build/web/index.html && test -f build/windows/Nelbrenn.exe
+          (cd build/windows && zip -q -r ../Nelbrenn-windows.zip .)
+          ls -la build build/web build/windows
+
+      - name: Upload browser version
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+      - name: Publish Windows release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$VERSION" build/Nelbrenn-windows.zip \
+            --title "Nelbrenn $VERSION" \
+            --notes "$(git log -1 --pretty=%B)" \
+            --target "$GITHUB_SHA" \
+            --latest
+
+  deploy-web:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
