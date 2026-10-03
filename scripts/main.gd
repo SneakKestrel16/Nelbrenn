@@ -6,6 +6,8 @@ const WorldScript := preload("res://scripts/world.gd")
 const PlayerScript := preload("res://scripts/player.gd")
 const DayNightScript := preload("res://scripts/day_night.gd")
 const SaveGame := preload("res://scripts/save_game.gd")
+const InventoryScript := preload("res://scripts/inventory.gd")
+const InventoryUIScript := preload("res://scripts/inventory_ui.gd")
 
 ## Seed for a brand-new world. A saved game keeps the seed it was started with.
 @export var world_seed: int = 1337
@@ -14,6 +16,8 @@ const SaveGame := preload("res://scripts/save_game.gd")
 var world  # world.gd
 var player  # player.gd
 var day_night  # day_night.gd
+var inventory  # inventory.gd
+var inventory_ui  # inventory_ui.gd
 
 var _toast: Label
 var _toast_tween: Tween
@@ -60,6 +64,21 @@ func _ready() -> void:
 	else:
 		player.global_position = world.find_spawn_point()
 
+	inventory = InventoryScript.new()
+	inventory.name = "Inventory"
+	add_child(inventory)
+	inventory.changed.connect(_on_inventory_changed)
+	if save.has("inventory"):
+		inventory.apply_save_data(save["inventory"])
+	else:
+		inventory.give_starter_items()
+
+	inventory_ui = InventoryUIScript.new()
+	inventory_ui.name = "InventoryUI"
+	inventory_ui.inventory = inventory
+	inventory_ui.player = player
+	add_child(inventory_ui)
+
 	world.target = player
 	world.generate_around(player.global_position, true)
 
@@ -88,6 +107,7 @@ func save_game(announce: bool) -> void:
 		"world_seed": world_seed,
 		"time_of_day": day_night.time_of_day,
 		"player": player.get_save_data(),
+		"inventory": inventory.get_save_data(),
 		"saved_at": Time.get_datetime_string_from_system(),
 	}
 	var ok: bool = SaveGame.write(data)
@@ -105,6 +125,19 @@ func _request_restart() -> void:
 	# Reloading with no save starts fresh, using the world_seed set on this scene.
 	SaveGame.delete()
 	get_tree().reload_current_scene()
+
+
+## Worn equipment changes how the player looks, runs and jumps.
+func _on_inventory_changed() -> void:
+	var stats: Dictionary = inventory.get_stats()
+	player.speed_bonus = stats["speed"]
+	player.jump_bonus = stats["jump"]
+	var colors := {}
+	for slot in inventory.ARMOR_SLOTS + inventory.ACCESSORY_SLOTS:
+		var color = inventory.worn_color(slot)
+		if color != null:
+			colors[slot] = color
+	player.set_look(colors)
 
 
 func show_message(text: String) -> void:
@@ -142,6 +175,7 @@ func _setup_input() -> void:
 	_add_keys("release_mouse", [KEY_ESCAPE])
 	_add_keys("save_game", [KEY_F5])
 	_add_keys("restart_game", [KEY_F9])
+	_add_keys("inventory", [KEY_I, KEY_TAB])
 
 
 func _add_keys(action: StringName, keys: Array) -> void:

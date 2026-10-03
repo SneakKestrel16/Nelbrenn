@@ -12,6 +12,12 @@ const GRAVITY := 22.0
 const MOUSE_SENSITIVITY := 0.0025
 const WATER_LEVEL := 0.0
 
+## Turned off while a menu (like the inventory) is open.
+var controls_enabled := true
+## Percent bonuses from worn equipment.
+var speed_bonus := 0.0
+var jump_bonus := 0.0
+
 var _camera_yaw: Node3D
 var _camera_pitch: Node3D
 var _camera: Camera3D
@@ -27,7 +33,9 @@ func _ready() -> void:
 	collision.position.y = 0.9
 	add_child(collision)
 
-	_model = _build_model()
+	_model = MeshInstance3D.new()
+	_model.material_override = LowPoly.make_material()
+	set_look({})
 	add_child(_model)
 
 	_camera_yaw = Node3D.new()
@@ -55,6 +63,8 @@ func _ready() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if not controls_enabled:
+		return
 	if event is InputEventMouseButton and event.pressed:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	elif event.is_action_pressed("release_mouse"):
@@ -67,7 +77,9 @@ func _unhandled_input(event: InputEvent) -> void:
 func _physics_process(delta: float) -> void:
 	var swimming := global_position.y + 1.0 < WATER_LEVEL
 
-	var input := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
+	var input := Vector2.ZERO
+	if controls_enabled:
+		input = Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 	var direction := (_camera_yaw.global_basis * Vector3(input.x, 0, input.y))
 	direction.y = 0
 	direction = direction.normalized()
@@ -75,8 +87,9 @@ func _physics_process(delta: float) -> void:
 	var speed := WALK_SPEED
 	if swimming:
 		speed = SWIM_SPEED
-	elif Input.is_action_pressed("sprint"):
+	elif controls_enabled and Input.is_action_pressed("sprint"):
 		speed = SPRINT_SPEED
+	speed *= 1.0 + speed_bonus / 100.0
 
 	if swimming:
 		# Float gently back up to the surface.
@@ -84,8 +97,8 @@ func _physics_process(delta: float) -> void:
 	elif not is_on_floor():
 		velocity.y -= GRAVITY * delta
 
-	if Input.is_action_just_pressed("jump") and (is_on_floor() or swimming):
-		velocity.y = JUMP_VELOCITY
+	if controls_enabled and Input.is_action_just_pressed("jump") and (is_on_floor() or swimming):
+		velocity.y = JUMP_VELOCITY * sqrt(1.0 + jump_bonus / 100.0)  # sqrt so jump height grows by jump_bonus %
 
 	var accel := 12.0 if is_on_floor() or swimming else 3.0
 	velocity.x = move_toward(velocity.x, direction.x * speed, speed * accel * delta)
@@ -127,15 +140,22 @@ func apply_save_data(data: Dictionary) -> void:
 	velocity = Vector3.ZERO
 
 
-func _build_model() -> MeshInstance3D:
+## Rebuilds the character, coloured by worn equipment.
+## colors maps an equipment slot ("head", "chest", ...) to the worn item's colour.
+func set_look(colors: Dictionary) -> void:
+	var skin := Color(0.95, 0.78, 0.62)
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	LowPoly.add_cylinder(st, 0.3, 0.4, 0.9, 6, Vector3(0, 0.55, 0), Color(0.25, 0.32, 0.55))   # legs
-	LowPoly.add_cylinder(st, 0.35, 0.42, 0.7, 6, Vector3(0, 1.2, 0), Color(0.75, 0.25, 0.20))  # tunic
-	LowPoly.add_blob(st, 0.28, Vector3(0, 1.8, 0), Color(0.95, 0.78, 0.62), 5)                # head
-	LowPoly.add_cylinder(st, 0.0, 0.32, 0.45, 6, Vector3(0, 2.15, 0), Color(0.30, 0.55, 0.30)) # hat
-	LowPoly.add_cylinder(st, 0.08, 0.08, 0.25, 4, Vector3(0, 1.78, -0.3), Color(0.95, 0.78, 0.62)) # nose, shows facing
-	var mesh_instance := MeshInstance3D.new()
-	mesh_instance.mesh = st.commit()
-	mesh_instance.material_override = LowPoly.make_material()
-	return mesh_instance
+	LowPoly.add_cylinder(st, 0.3, 0.4, 0.9, 6, Vector3(0, 0.55, 0), colors.get("legs", Color(0.25, 0.32, 0.55)))   # legs
+	LowPoly.add_cylinder(st, 0.35, 0.42, 0.7, 6, Vector3(0, 1.2, 0), colors.get("chest", Color(0.75, 0.25, 0.20))) # tunic
+	LowPoly.add_blob(st, 0.28, Vector3(0, 1.8, 0), skin, 5)                                                        # head
+	LowPoly.add_cylinder(st, 0.08, 0.08, 0.25, 4, Vector3(0, 1.78, -0.3), skin)                                    # nose, shows facing
+	if colors.has("head"):  # helmet
+		LowPoly.add_cylinder(st, 0.2, 0.34, 0.3, 6, Vector3(0, 2.02, 0), colors["head"])
+	else:  # the usual pointy hat
+		LowPoly.add_cylinder(st, 0.0, 0.32, 0.45, 6, Vector3(0, 2.15, 0), Color(0.30, 0.55, 0.30))
+	if colors.has("feet"):  # boots
+		LowPoly.add_cylinder(st, 0.42, 0.44, 0.3, 6, Vector3(0, 0.2, 0), colors["feet"])
+	if colors.has("neck"):  # amulet on the chest
+		LowPoly.add_blob(st, 0.09, Vector3(0, 1.38, -0.4), colors["neck"], 3)
+	_model.mesh = st.commit()
