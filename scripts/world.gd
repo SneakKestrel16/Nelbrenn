@@ -52,6 +52,7 @@ var _chip_mesh: BoxMesh
 var _resources := {}              ## Vector2i -> Array of harvestable nodes in that chunk
 var _resource_by_id := {}         ## node id -> node, for loaded chunks
 var _harvested := {}              ## node id -> unix time it grows back (saved)
+var _structures: Array = []       ## Things the player built: {"kind", "pos", "yaw", "node"} (saved)
 var _regrow_timer := 0.0
 
 
@@ -522,7 +523,10 @@ func spawn_chips(pos: Vector3, color: Color, amount := 8) -> void:
 
 
 func get_save_data() -> Dictionary:
-	return {"harvested": _harvested.duplicate()}
+	var structures := []
+	for s in _structures:
+		structures.append({"kind": s["kind"], "pos": [s["pos"].x, s["pos"].y, s["pos"].z], "yaw": s["yaw"]})
+	return {"harvested": _harvested.duplicate(), "structures": structures}
 
 
 func apply_save_data(data: Dictionary) -> void:
@@ -531,6 +535,73 @@ func apply_save_data(data: Dictionary) -> void:
 	if saved is Dictionary:
 		for id in saved:
 			_harvested[String(id)] = float(saved[id])
+	for s in _structures.duplicate():
+		remove_structure(s)
+	for s in data.get("structures", []):
+		if s is Dictionary and _prop_meshes.has(String(s.get("kind", ""))) and s.get("pos", []).size() == 3:
+			place_structure(String(s["kind"]), Vector3(s["pos"][0], s["pos"][1], s["pos"][2]), float(s.get("yaw", 0.0)))
+
+
+# --- Things the player builds (crafting benches) ------------------------------
+
+## Why something can't be built at `pos`, or "" if it can.
+func can_place(pos: Vector3) -> String:
+	var h := get_height(pos.x, pos.z)
+	if h < WATER_LEVEL + 0.3:
+		return "You can't build in the water."
+	for offset in [Vector2(0.9, 0), Vector2(-0.9, 0), Vector2(0, 0.9), Vector2(0, -0.9)]:
+		if absf(get_height(pos.x + offset.x, pos.z + offset.y) - h) > 0.7:
+			return "The ground is too steep here."
+	for s in _structures:
+		if s["pos"].distance_to(pos) < 2.2:
+			return "Too close to another bench."
+	return ""
+
+
+func place_structure(kind: String, pos: Vector3, yaw: float) -> Dictionary:
+	var node := Node3D.new()
+	node.name = "Structure"
+	add_child(node)
+	node.global_position = pos
+	node.rotation.y = yaw
+	var mesh := MeshInstance3D.new()
+	mesh.mesh = _prop_meshes[kind]
+	mesh.material_override = _terrain_material
+	node.add_child(mesh)
+	var body := StaticBody3D.new()
+	node.add_child(body)
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(1.6, 1.0, 0.9)
+	var collision := CollisionShape3D.new()
+	collision.shape = shape
+	collision.position.y = 0.5
+	body.add_child(collision)
+	var s := {"kind": kind, "pos": pos, "yaw": yaw, "node": node, "radius": 0.8}
+	_structures.append(s)
+	return s
+
+
+func remove_structure(s: Dictionary) -> void:
+	_structures.erase(s)
+	s["node"].queue_free()
+
+
+## The built thing the player at `from`, looking along `forward`, can use, or {}.
+func find_structure(from: Vector3, forward: Vector3, reach: float) -> Dictionary:
+	var best := {}
+	var best_dist := INF
+	for s in _structures:
+		var to: Vector3 = s["pos"] - from
+		if absf(to.y) > 2.5:
+			continue
+		to.y = 0.0
+		var dist: float = to.length() - s["radius"]
+		if dist > reach or (dist > 0.5 and forward.dot(to.normalized()) < 0.2):
+			continue
+		if dist < best_dist:
+			best_dist = dist
+			best = s
+	return best
 
 
 ## Grows back things whose regrow time has passed.
@@ -655,6 +726,20 @@ func _build_prop_meshes() -> void:
 		var dir := Vector3(berry_rng.randf_range(-1.0, 1.0), berry_rng.randf_range(0.0, 1.0), berry_rng.randf_range(-1.0, 1.0)).normalized()
 		LowPoly.add_blob(bush, 0.1, Vector3(0, 0.55, 0) + dir * 0.75, Color(0.80, 0.12, 0.22), 60 + j)
 	_prop_meshes["berry_bush"] = bush.commit()
+
+	# Crafting bench: a plank table on four legs, with a hammer and a block of stone on top.
+	var bench := SurfaceTool.new()
+	bench.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var plank := Color(0.66, 0.48, 0.29)
+	LowPoly.add_box(bench, Vector3(1.6, 0.14, 0.9), Vector3(0, 0.93, 0), plank)
+	for x in [-0.68, 0.68]:
+		for z in [-0.35, 0.35]:
+			LowPoly.add_box(bench, Vector3(0.14, 0.86, 0.14), Vector3(x, 0.43, z), bark)
+	LowPoly.add_box(bench, Vector3(1.4, 0.08, 0.08), Vector3(0, 0.3, 0.35), bark)  # Footrest.
+	LowPoly.add_box(bench, Vector3(0.36, 0.22, 0.3), Vector3(0.45, 1.11, 0.05), Color(0.55, 0.53, 0.50))
+	LowPoly.add_box(bench, Vector3(0.5, 0.05, 0.05), Vector3(-0.3, 1.03, 0.1), bark)  # Hammer handle.
+	LowPoly.add_box(bench, Vector3(0.1, 0.1, 0.2), Vector3(-0.55, 1.05, 0.1), Color(0.62, 0.64, 0.68))
+	_prop_meshes["crafting_bench"] = bench.commit()
 
 
 func _build_water() -> void:

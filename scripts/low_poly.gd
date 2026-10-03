@@ -52,6 +52,23 @@ static func add_cylinder(st: SurfaceTool, top_radius: float, bottom_radius: floa
 		add_tri(st, bottom, b1, b0, center, color)
 
 
+## A box of the given size centred on `center`.
+static func add_box(st: SurfaceTool, size: Vector3, center: Vector3, color: Color) -> void:
+	var h := size * 0.5
+	var c := func(x: float, y: float, z: float) -> Vector3: return center + Vector3(x * h.x, y * h.y, z * h.z)
+	var faces := [
+		[c.call(-1, -1, -1), c.call(1, -1, -1), c.call(1, 1, -1), c.call(-1, 1, -1)],
+		[c.call(-1, -1, 1), c.call(1, -1, 1), c.call(1, 1, 1), c.call(-1, 1, 1)],
+		[c.call(-1, -1, -1), c.call(-1, 1, -1), c.call(-1, 1, 1), c.call(-1, -1, 1)],
+		[c.call(1, -1, -1), c.call(1, 1, -1), c.call(1, 1, 1), c.call(1, -1, 1)],
+		[c.call(-1, -1, -1), c.call(1, -1, -1), c.call(1, -1, 1), c.call(-1, -1, 1)],
+		[c.call(-1, 1, -1), c.call(1, 1, -1), c.call(1, 1, 1), c.call(-1, 1, 1)],
+	]
+	for f in faces:
+		add_tri(st, f[0], f[1], f[2], center, color)
+		add_tri(st, f[0], f[2], f[3], center, color)
+
+
 ## A lumpy low-poly sphere, used for bushy tree tops and rocks.
 static func add_blob(st: SurfaceTool, radius: float, center: Vector3, color: Color, rng_seed: int) -> void:
 	var rng := RandomNumberGenerator.new()

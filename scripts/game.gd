@@ -13,6 +13,7 @@ const AmbienceScript := preload("res://scripts/ambience.gd")
 const GatheringScript := preload("res://scripts/gathering.gd")
 const VitalsScript := preload("res://scripts/vitals.gd")
 const HudScript := preload("res://scripts/hud.gd")
+const CraftingUIScript := preload("res://scripts/crafting_ui.gd")
 const Items := preload("res://scripts/items.gd")
 
 @export var autosave_seconds := 30.0
@@ -28,6 +29,7 @@ var inventory  # inventory.gd
 var inventory_ui  # inventory_ui.gd
 var pause_menu  # pause_menu.gd
 var vitals  # vitals.gd
+var crafting_ui  # crafting_ui.gd
 
 var _sun: DirectionalLight3D
 var _save_info := {}  # The world's name and dates, kept when saving.
@@ -113,6 +115,8 @@ func _ready() -> void:
 	hud.inventory = inventory
 	hud.player = player
 	hud.vitals = vitals
+	hud.world = world
+	hud.game = self
 	add_child(hud)
 
 	inventory_ui = InventoryUIScript.new()
@@ -128,6 +132,16 @@ func _ready() -> void:
 	gathering.inventory = inventory
 	gathering.game = self
 	add_child(gathering)
+
+	crafting_ui = CraftingUIScript.new()
+	crafting_ui.name = "CraftingUI"
+	crafting_ui.inventory = inventory
+	crafting_ui.player = player
+	crafting_ui.world = world
+	crafting_ui.game = self
+	crafting_ui.gathering = gathering
+	add_child(crafting_ui)
+	gathering.use_structure.connect(crafting_ui.open)
 
 	var ambience := AmbienceScript.new()
 	ambience.name = "Ambience"

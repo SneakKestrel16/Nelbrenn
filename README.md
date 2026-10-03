@@ -42,7 +42,8 @@ The game opens on the **main menu**:
 | Space | Jump / swim up |
 | 1–8 / mouse wheel | Pick a hotbar slot (the item goes in your hand) |
 | E / left click (hold) | Chop, mine or pick what's in front of you |
-| F / right click | Eat the food in your hand |
+| F / right click | Eat the food in your hand, or build the bench in your hand |
+| E / left click (at a bench) | Open the crafting menu |
 | I / Tab | Open or close the inventory |
 | F5 | Quick save |
 | Esc | Pause menu (resume, settings, save, quit) |
@@ -75,12 +76,12 @@ right-click an item to equip or unequip it.
 
 ## Tools, food and hunger
 
-A new world starts with a **stone axe**, a **stone pickaxe** and some apples
-on the hotbar (older worlds get the two tools added once).
+A new world starts with a **stone axe**, a **stone pickaxe**, some apples and
+a **crafting bench** on the hotbar (older worlds get anything they're missing
+from that list added once).
 
 - **Axes** chop trees faster, **pickaxes** break rocks faster. You get the
-  same amount of loot, just in fewer swings. Iron tools are even faster;
-  they exist in `scripts/items.gd`, but there's no crafting to make them yet.
+  same amount of loot, just in fewer swings. Iron tools (crafted) are even faster.
 - **Ore deposits and crystals need a pickaxe** in your hand. Trees, rocks
   and bushes can also be gathered with bare hands, just slowly.
 - **Hunger** (the orange bar) slowly runs down, twice as fast while
@@ -117,6 +118,26 @@ Harvested things grow back after 5–50 minutes (even while the game is
 closed). To change what drops, how many hits things take or how fast they
 regrow, edit `scripts/harvestables.gd`.
 
+## Crafting
+
+Crafting only works at a **crafting bench**. Put the bench on your hotbar,
+pick it, and right-click (or press F) to build it in front of you. Walk up to
+it and press **E** or click to open the crafting menu: pick a recipe on the
+left, see what it needs and what you have, and press **Craft**. **Pick Up
+Bench** puts it back in your bag so you can build it somewhere else. A bench
+can make more benches.
+
+| Group | Recipes |
+| --- | --- |
+| Building | Crafting Bench (8 wood, 4 stone) |
+| Tools | Stone Axe / Pickaxe (3 wood, 3 stone), Iron Axe / Pickaxe (2 wood, 3 iron bars) |
+| Smelting | Copper, Iron and Gold Bars (2 ore + 1 coal each) |
+| Armor & accessories | Copper Helm, Iron Helm, Chainmail, Gold Ring, Crystal Charm |
+| Food | Fruit Salad (2 apples, 4 berries; very filling) |
+
+Benches you build are saved with the world. To add or change recipes, edit
+`scripts/recipes.gd`.
+
 ## Saving
 
 Every world has its own save. The game saves automatically every 30 seconds,
@@ -142,10 +163,12 @@ from before multiple worlds existed is moved in automatically as
 | `scripts/settings.gd` | All settings and key bindings (an autoload, so every script can use `Settings`) |
 | `scripts/settings_menu.gd` | The settings screen, shared by the main and pause menus |
 | `scripts/ui.gd` | Shared menu look (colours, buttons, panels) |
-| `scripts/world.gd` | Terrain shape and colours, chunk streaming, trees, rocks, ores, bushes and water |
+| `scripts/world.gd` | Terrain shape and colours, chunk streaming, trees, rocks, ores, bushes, water and built benches |
 | `scripts/harvestables.gd` | What every tree, rock and ore drops, how many hits it takes, regrow times |
 | `scripts/gathering.gd` | Chopping and mining: aiming, tools, the on-screen prompt, pickups and sounds |
-| `scripts/hud.gd` | Hotbar and health / food bars on screen; picking slots and eating |
+| `scripts/hud.gd` | Hotbar and health / food bars on screen; picking slots, eating and building |
+| `scripts/recipes.gd` | Every crafting recipe |
+| `scripts/crafting_ui.gd` | The crafting bench menu |
 | `scripts/vitals.gd` | Health and hunger, eating, and fainting |
 | `scripts/player.gd` | Player movement, swimming and the third-person camera |
 | `scripts/day_night.gd` | Sun movement and sky colours over the day |

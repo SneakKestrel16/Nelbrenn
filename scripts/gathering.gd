@@ -17,7 +17,15 @@ var player  # player.gd
 var inventory  # inventory.gd
 var game  # game.gd, for messages
 
+## Pressing the gather key at a crafting bench emits this instead.
+signal use_structure(structure: Dictionary)
+
 var _target := {}
+var _structure := {}  # A bench in reach; takes priority over gathering.
+var _mouse_was_down := false
+## Ignore the gather key until this time (msec), so closing a menu with E
+## doesn't open it again straight away.
+var block_until_msec := 0
 var _cooldown := 0.0
 var _full_cooldown := 0.0
 var _rng := RandomNumberGenerator.new()
@@ -47,9 +55,17 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	_cooldown -= delta
 	_full_cooldown -= delta
-	var active: bool = player.controls_enabled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
-	_target = world.find_resource(player.global_position, player.get_look_direction(), REACH) if active else {}
-	if not _target.is_empty() and _wants_gather() and _cooldown <= 0.0:
+	var active: bool = player.controls_enabled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED \
+			and Time.get_ticks_msec() >= block_until_msec
+	var mouse_down := Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+	var just_pressed := (mouse_down and not _mouse_was_down) \
+			or (InputMap.has_action("gather") and Input.is_action_just_pressed("gather"))
+	_mouse_was_down = mouse_down
+	_structure = world.find_structure(player.global_position, player.get_look_direction(), REACH + 0.4) if active else {}
+	_target = world.find_resource(player.global_position, player.get_look_direction(), REACH) if active and _structure.is_empty() else {}
+	if not _structure.is_empty() and just_pressed:
+		use_structure.emit(_structure)
+	elif not _target.is_empty() and _wants_gather() and _cooldown <= 0.0:
 		_cooldown = HIT_INTERVAL
 		_hit(_target)
 		if not _target["alive"]:
@@ -88,9 +104,7 @@ func _hit(node: Dictionary) -> void:
 		return
 
 	player.swing_at(node["pos"])
-	_audio.stream = _sounds[info["sound"]]
-	_audio.pitch_scale = _rng.randf_range(0.88, 1.12)
-	_audio.play()
+	play_sound(info["sound"])
 
 	var dealt := mini(damage, node["hp"])  # So a tool gets you there faster, not less loot.
 	var broke: bool = world.hit_resource(node, player.global_position, damage)
@@ -107,6 +121,13 @@ func _hit(node: Dictionary) -> void:
 			_bag_full()
 
 
+## Plays "chop", "mine" or "pick" at a slightly random pitch.
+func play_sound(kind: String) -> void:
+	_audio.stream = _sounds[kind]
+	_audio.pitch_scale = _rng.randf_range(0.88, 1.12)
+	_audio.play()
+
+
 func _bag_full() -> void:
 	if _full_cooldown <= 0.0:
 		_full_cooldown = 2.5
@@ -117,12 +138,21 @@ func _bag_full() -> void:
 
 func _update_prompt() -> void:
 	var camera: Camera3D = player.get_camera()
+	var key := Settings.key_name(Settings.get_binding("gather", 0)) if InputMap.has_action("gather") else "—"
+	if not _structure.is_empty():
+		var spot: Vector3 = _structure["pos"] + Vector3.UP * 1.7
+		_prompt.visible = not camera.is_position_behind(spot)
+		_prompt_label.text = "[%s]  Use Crafting Bench" % ("Click" if key == "—" else key)
+		_prompt_label.modulate = Color.WHITE
+		_hp_bar.visible = false
+		_prompt.reset_size()
+		_prompt.position = camera.unproject_position(spot) - Vector2(_prompt.size.x * 0.5, _prompt.size.y)
+		return
 	var anchor: Vector3 = Vector3.ZERO if _target.is_empty() else _target["pos"] + Vector3.UP * (2.2 if _target["tree"] else 1.6)
 	if _target.is_empty() or camera.is_position_behind(anchor):
 		_prompt.visible = false
 		return
 	var info := Harvestables.get_info(_target["kind"])
-	var key := Settings.key_name(Settings.get_binding("gather", 0)) if InputMap.has_action("gather") else "—"
 	if _damage(_target) == 0:
 		_prompt_label.text = "%s  •  needs a %s" % [info["name"], info["tool"]]
 		_prompt_label.modulate = Color(1.0, 0.6, 0.5)

@@ -117,6 +117,40 @@ const ITEMS := {
 		"name": "Crystal", "slot": "", "icon": "gem", "color": Color(0.55, 0.85, 0.95),
 		"max_stack": 30, "description": "A clear crystal from the snowy peaks.",
 	},
+	# --- Crafted at a crafting bench (see recipes.gd) ---
+	"copper_bar": {
+		"name": "Copper Bar", "slot": "", "icon": "bar", "color": Color(0.85, 0.50, 0.25),
+		"max_stack": 50, "description": "Smelted copper, ready to work.",
+	},
+	"iron_bar": {
+		"name": "Iron Bar", "slot": "", "icon": "bar", "color": Color(0.70, 0.72, 0.76),
+		"max_stack": 50, "description": "Smelted iron. Makes strong tools and armor.",
+	},
+	"gold_bar": {
+		"name": "Gold Bar", "slot": "", "icon": "bar", "color": Color(1.0, 0.82, 0.25),
+		"max_stack": 50, "description": "Heavy, shiny and valuable.",
+	},
+	"copper_helm": {
+		"name": "Copper Helm", "slot": "head", "color": Color(0.80, 0.48, 0.25),
+		"armor": 2, "description": "Light and warm-coloured.",
+	},
+	"gold_ring": {
+		"name": "Gold Ring", "slot": "ring", "color": Color(1.0, 0.82, 0.25),
+		"armor": 1, "speed": 5, "description": "Your step feels a little lighter.",
+	},
+	"crystal_charm": {
+		"name": "Crystal Charm", "slot": "charm", "color": Color(0.55, 0.85, 0.95),
+		"speed": 5, "jump": 20, "description": "Hums softly. You run and jump better.",
+	},
+	"fruit_salad": {
+		"name": "Fruit Salad", "slot": "", "icon": "bowl", "color": Color(0.85, 0.30, 0.30),
+		"max_stack": 10, "food": 45, "description": "Apples and berries. Very filling.",
+	},
+	"crafting_bench": {
+		"name": "Crafting Bench", "slot": "", "icon": "bench", "color": Color(0.62, 0.45, 0.27),
+		"max_stack": 5, "place": "crafting_bench",
+		"description": "Hold it on the hotbar and right-click to build it. Press E at the bench to craft.",
+	},
 }
 
 

@@ -13,6 +13,8 @@ const FOOD_COLOR := Color(0.92, 0.62, 0.25)
 var inventory  # inventory.gd
 var player  # player.gd
 var vitals  # vitals.gd
+var world  # world.gd, for building
+var game  # game.gd, for messages
 
 var _slots: Array = []
 var _health_bar: ProgressBar
@@ -59,10 +61,25 @@ func _unhandled_input(event: InputEvent) -> void:
 		use_held_item()
 
 
-## Eats the held food. (Tools are used by gathering.gd instead.)
+## Eats the held food, or builds the held bench in front of you.
+## (Tools are used by gathering.gd instead.)
 func use_held_item() -> void:
 	var id: String = inventory.selected_id()
-	if Items.get_info(id).get("food", 0) > 0 and vitals.eat(id):
+	var info := Items.get_info(id)
+	if info.has("place"):
+		var look: Vector3 = player.get_look_direction()
+		var pos: Vector3 = player.global_position + look * 2.2
+		pos.y = world.get_height(pos.x, pos.z)
+		var problem: String = world.can_place(pos)
+		if problem != "":
+			game.show_message(problem)
+			return
+		world.place_structure(info["place"], pos, atan2(look.x, look.z))
+		inventory.consume_selected()
+		Settings.play_click()
+		game.show_message("Built a %s. Press %s at it to craft." % [info["name"],
+				Settings.key_name(Settings.get_binding("gather", 0))])
+	elif info.get("food", 0) > 0 and vitals.eat(id):
 		inventory.consume_selected()
 		player.eat_animation()
 		_audio.pitch_scale = randf_range(0.9, 1.1)

@@ -20,11 +20,14 @@ const SLOT_LABELS := {
 	"head": "Head", "chest": "Chest", "hands": "Hands", "legs": "Legs", "feet": "Feet",
 	"neck": "Amulet", "ring_1": "Ring", "ring_2": "Ring", "charm": "Charm",
 }
-const STARTER_TOOLS: Array[String] = ["stone_axe", "stone_pickaxe"]
+## Put on the hotbar of every new world. Older worlds get any they never
+## received when they're loaded (that's what `received` remembers).
+const STARTER_GIFTS: Array[String] = ["stone_axe", "stone_pickaxe", "crafting_bench"]
 
 var bag: Array = []
 var hotbar: Array = []
 var equipment := {}
+var received: Array = []
 ## The hotbar slot in your hand (0 to HOTBAR_SIZE - 1).
 var selected := 0
 
@@ -39,6 +42,7 @@ func clear() -> void:
 	hotbar.clear()
 	hotbar.resize(HOTBAR_SIZE)
 	selected = 0
+	received.clear()
 	equipment.clear()
 	for slot in ARMOR_SLOTS + ACCESSORY_SLOTS:
 		equipment[slot] = null
@@ -168,6 +172,23 @@ func count_of(id: String) -> int:
 	return n
 
 
+## Takes `count` of `id` out of the hotbar and bag (bag first). Returns false,
+## and takes nothing, if there aren't enough.
+func remove_item(id: String, count: int) -> bool:
+	if count_of(id) < count:
+		return false
+	for list in [bag, hotbar]:
+		for i in list.size():
+			if count > 0 and list[i] != null and list[i]["id"] == id:
+				var taken := mini(count, list[i]["count"])
+				list[i]["count"] -= taken
+				count -= taken
+				if list[i]["count"] <= 0:
+					list[i] = null
+	changed.emit()
+	return true
+
+
 func select(index: int) -> void:
 	index = posmod(index, HOTBAR_SIZE)
 	if index != selected:
@@ -223,8 +244,11 @@ func give_starter_items() -> void:
 	clear()
 	equip_new("leather_tunic")
 	equip_new("leather_boots")
-	_give_starter_tools()
+	hotbar[0] = {"id": "stone_axe", "count": 1}
+	hotbar[1] = {"id": "stone_pickaxe", "count": 1}
 	hotbar[2] = {"id": "apple", "count": 5}
+	hotbar[3] = {"id": "crafting_bench", "count": 1}
+	received = STARTER_GIFTS.duplicate()
 	for id in ["leather_cap", "iron_helm", "chainmail", "leather_gloves", "leather_trousers",
 			"swift_boots", "amber_amulet", "silver_ring", "ruby_ring", "feather_charm"]:
 		add_item(id)
@@ -235,6 +259,7 @@ func get_save_data() -> Dictionary:
 	return {
 		"bag": bag.duplicate(true), "hotbar": hotbar.duplicate(true),
 		"equipment": equipment.duplicate(true), "selected": selected,
+		"received": received.duplicate(),
 	}
 
 
@@ -253,13 +278,18 @@ func apply_save_data(data: Dictionary) -> void:
 		equipment[slot] = entry if can_hold(slot, entry) else null
 		if entry != null and equipment[slot] == null:
 			add_item(entry["id"], entry["count"])
-	if not data.has("hotbar"):
-		_give_starter_tools()  # Saves from before the hotbar existed get the starter tools too.
+	# Saves with a hotbar but no `received` list already got the two tools.
+	var default_received: Array = ["stone_axe", "stone_pickaxe"] if data.has("hotbar") else []
+	received = Array(data.get("received", default_received)).map(func(id): return String(id))
+	_give_missing_gifts()
 	changed.emit()
 
 
-func _give_starter_tools() -> void:
-	for id in STARTER_TOOLS:
+func _give_missing_gifts() -> void:
+	for id in STARTER_GIFTS:
+		if id in received:
+			continue
+		received.append(id)
 		var empty := hotbar.find(null)
 		if empty != -1:
 			hotbar[empty] = {"id": id, "count": 1}

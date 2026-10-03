@@ -182,6 +182,22 @@ static func draw_icon(canvas: CanvasItem, id: String, placeholder: String, rect:
 			else:
 				canvas.draw_colored_polygon(p.call([Vector2(0.2, 0.12), Vector2(0.62, 0.02), Vector2(1.0, 0.25),
 						Vector2(0.98, 0.42), Vector2(0.68, 0.24), Vector2(0.3, 0.28)]), color)
+		"bar":  # An ingot.
+			canvas.draw_colored_polygon(p.call([Vector2(0.05, 0.75), Vector2(0.95, 0.75), Vector2(0.8, 0.4),
+					Vector2(0.2, 0.4)]), color)
+			canvas.draw_colored_polygon(p.call([Vector2(0.2, 0.4), Vector2(0.8, 0.4), Vector2(0.72, 0.3),
+					Vector2(0.28, 0.3)]), color.lightened(0.3))
+		"bench":
+			canvas.draw_rect(Rect2(o + Vector2(0.05, 0.3) * s, Vector2(0.9, 0.14) * s), color)
+			for x in [0.12, 0.78]:
+				canvas.draw_rect(Rect2(o + Vector2(x, 0.44) * s, Vector2(0.1, 0.5) * s), dark)
+			canvas.draw_rect(Rect2(o + Vector2(0.55, 0.15) * s, Vector2(0.25, 0.15) * s), Color(0.6, 0.6, 0.6))
+		"bowl":
+			canvas.draw_circle(o + Vector2(0.32, 0.45) * s, 0.14 * s, color)
+			canvas.draw_circle(o + Vector2(0.55, 0.4) * s, 0.12 * s, Color(0.80, 0.12, 0.22))
+			canvas.draw_circle(o + Vector2(0.68, 0.48) * s, 0.12 * s, Color(0.95, 0.75, 0.3))
+			canvas.draw_colored_polygon(p.call([Vector2(0.05, 0.5), Vector2(0.95, 0.5), Vector2(0.8, 0.85),
+					Vector2(0.2, 0.85)]), Color(0.62, 0.45, 0.27))
 		"lump":
 			canvas.draw_colored_polygon(p.call([Vector2(0.2, 0.85), Vector2(0.08, 0.55), Vector2(0.25, 0.25),
 					Vector2(0.55, 0.18), Vector2(0.9, 0.35), Vector2(0.92, 0.7), Vector2(0.7, 0.9)]), color)
