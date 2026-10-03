@@ -192,6 +192,18 @@ static func draw_icon(canvas: CanvasItem, id: String, placeholder: String, rect:
 			for x in [0.12, 0.78]:
 				canvas.draw_rect(Rect2(o + Vector2(x, 0.44) * s, Vector2(0.1, 0.5) * s), dark)
 			canvas.draw_rect(Rect2(o + Vector2(0.55, 0.15) * s, Vector2(0.25, 0.15) * s), Color(0.6, 0.6, 0.6))
+		"lantern":
+			canvas.draw_arc(o + Vector2(0.5, 0.18) * s, 0.12 * s, PI, TAU, 10, Color(0.35, 0.33, 0.3), 0.05 * s)
+			canvas.draw_rect(Rect2(o + Vector2(0.25, 0.25) * s, Vector2(0.5, 0.65) * s), Color(0.3, 0.28, 0.26))
+			canvas.draw_rect(Rect2(o + Vector2(0.32, 0.33) * s, Vector2(0.36, 0.48) * s), color)
+			canvas.draw_circle(o + Vector2(0.5, 0.6) * s, 0.1 * s, Color(1.0, 0.95, 0.7))
+		"campfire":
+			for x in [0.15, 0.55]:
+				canvas.draw_line(o + Vector2(x, 0.95) * s, o + Vector2(x + 0.3, 0.75) * s, Color(0.5, 0.33, 0.2), 0.12 * s)
+			canvas.draw_colored_polygon(p.call([Vector2(0.5, 0.1), Vector2(0.75, 0.6), Vector2(0.62, 0.85),
+					Vector2(0.38, 0.85), Vector2(0.25, 0.6)]), color)
+			canvas.draw_colored_polygon(p.call([Vector2(0.5, 0.4), Vector2(0.62, 0.7), Vector2(0.5, 0.85),
+					Vector2(0.38, 0.7)]), Color(1.0, 0.9, 0.4))
 		"bowl":
 			canvas.draw_circle(o + Vector2(0.32, 0.45) * s, 0.14 * s, color)
 			canvas.draw_circle(o + Vector2(0.55, 0.4) * s, 0.12 * s, Color(0.80, 0.12, 0.22))

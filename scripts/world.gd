@@ -12,6 +12,7 @@ const CHUNKS_PER_FRAME := 1       ## Build budget, keeps the frame rate smooth.
 const WATER_LEVEL := 0.0
 const LOD_DISTANCE := 110.0       ## Beyond this (from a chunk's centre), trees and rocks use simpler models.
 const PROPS_CENTER := Vector3(CHUNK_SIZE * 0.5, 0, CHUNK_SIZE * 0.5)
+const FIRE_RADIUS := 10.0         ## Monsters keep this far from a campfire.
 
 const COLOR_SAND := Color(0.86, 0.79, 0.55)
 const COLOR_WET_SAND := Color(0.72, 0.65, 0.45)
@@ -50,6 +51,8 @@ var _ground_material: StandardMaterial3D
 var _water: MeshInstance3D
 var _prop_meshes := {}            ## name -> ArrayMesh
 var _chip_mesh: BoxMesh
+var _flame_mesh: ArrayMesh
+var _flame_material: StandardMaterial3D
 
 var _resources := {}              ## Vector2i -> Array of harvestable nodes in that chunk
 var _resource_by_id := {}         ## node id -> node, for loaded chunks
@@ -99,6 +102,7 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	_flicker()
 	_regrow_timer -= delta
 	if _regrow_timer <= 0.0:
 		_regrow_timer = 2.0
@@ -587,7 +591,7 @@ func can_place(pos: Vector3) -> String:
 			return "The ground is too steep here."
 	for s in _structures:
 		if s["pos"].distance_to(pos) < 2.2:
-			return "Too close to another bench."
+			return "Too close to something you've built."
 	return ""
 
 
@@ -601,17 +605,68 @@ func place_structure(kind: String, pos: Vector3, yaw: float) -> Dictionary:
 	mesh.mesh = _prop_meshes[kind]
 	mesh.material_override = _terrain_material
 	node.add_child(mesh)
-	var body := StaticBody3D.new()
-	node.add_child(body)
-	var shape := BoxShape3D.new()
-	shape.size = Vector3(1.6, 1.0, 0.9)
-	var collision := CollisionShape3D.new()
-	collision.shape = shape
-	collision.position.y = 0.5
-	body.add_child(collision)
 	var s := {"kind": kind, "pos": pos, "yaw": yaw, "node": node, "radius": 0.8}
+	if kind == "campfire":
+		var flames := MeshInstance3D.new()
+		flames.mesh = _flame_mesh
+		flames.material_override = _flame_material
+		flames.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		flames.position.y = 0.15
+		node.add_child(flames)
+		var light := OmniLight3D.new()
+		light.light_color = Color(1.0, 0.6, 0.3)
+		light.omni_range = FIRE_RADIUS + 4.0
+		light.light_energy = 2.5
+		light.shadow_enabled = true
+		light.position.y = 1.0
+		node.add_child(light)
+		s["flames"] = flames
+		s["light"] = light
+		s["radius"] = 0.6
+	else:
+		var body := StaticBody3D.new()
+		node.add_child(body)
+		var shape := BoxShape3D.new()
+		shape.size = Vector3(1.6, 1.0, 0.9)
+		var collision := CollisionShape3D.new()
+		collision.shape = shape
+		collision.position.y = 0.5
+		body.add_child(collision)
 	_structures.append(s)
 	return s
+
+
+## One of the shared prop meshes ("berry_bush", "rock", ...), e.g. for disguises.
+func get_prop_mesh(kind: String) -> Mesh:
+	return _prop_meshes.get(kind)
+
+
+## True if `pos` is within the light of a campfire (monsters won't go there).
+func near_fire(pos: Vector3, extra := 0.0) -> bool:
+	for s in _structures:
+		if s["kind"] == "campfire" and Vector2(s["pos"].x - pos.x, s["pos"].z - pos.z).length() < FIRE_RADIUS + extra:
+			return true
+	return false
+
+
+## The nearest campfire's position to `pos`, or null if there are none.
+func nearest_fire(pos: Vector3) -> Variant:
+	var best = null
+	for s in _structures:
+		if s["kind"] == "campfire" and (best == null or s["pos"].distance_to(pos) < best.distance_to(pos)):
+			best = s["pos"]
+	return best
+
+
+## Campfires flicker.
+func _flicker() -> void:
+	var t := Time.get_ticks_msec() * 0.001
+	for s in _structures:
+		if s.has("light"):
+			var wobble := sin(t * 11.0 + s["pos"].x) * 0.5 + sin(t * 23.0 + s["pos"].z) * 0.3
+			s["light"].light_energy = 2.5 + wobble * 0.5
+			s["flames"].scale = Vector3(1.0 + wobble * 0.08, 1.0 + wobble * 0.18, 1.0 + wobble * 0.08)
+			s["flames"].rotation.y = t * 0.7
 
 
 func remove_structure(s: Dictionary) -> void:
@@ -619,11 +674,13 @@ func remove_structure(s: Dictionary) -> void:
 	s["node"].queue_free()
 
 
-## The built thing the player at `from`, looking along `forward`, can use, or {}.
+## The crafting bench the player at `from`, looking along `forward`, can use, or {}.
 func find_structure(from: Vector3, forward: Vector3, reach: float) -> Dictionary:
 	var best := {}
 	var best_dist := INF
 	for s in _structures:
+		if s["kind"] != "crafting_bench":
+			continue
 		var to: Vector3 = s["pos"] - from
 		if absf(to.y) > 2.5:
 			continue
@@ -835,6 +892,30 @@ func _build_prop_meshes() -> void:
 	bush_far.begin(Mesh.PRIMITIVE_TRIANGLES)
 	LowPoly.add_blob(bush_far, 0.8, Vector3(0.05, 0.5, 0), Color(0.25, 0.51, 0.22), 51, 0.0, 0.85)
 	_prop_meshes["berry_bush_far"] = bush_far.commit()
+
+	# Campfire: a ring of stones around crossed logs. The flames are separate
+	# (they glow and flicker).
+	var fire := SurfaceTool.new()
+	fire.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in 9:
+		var a := TAU * i / 9.0
+		LowPoly.add_blob(fire, 0.16, Vector3(cos(a) * 0.62, 0.05, sin(a) * 0.62), stone.darkened(0.1), 70 + i, 0.1, 0.7)
+	for i in 4:
+		var a := TAU * i / 4.0 + 0.4
+		var out := Vector3(cos(a), 0, sin(a))
+		LowPoly.add_limb(fire, out * 0.5 + Vector3(0, 0.02, 0), -out * 0.15 + Vector3(0, 0.4, 0), 0.08, 0.07, 5, bark, 0.1)
+	LowPoly.add_blob(fire, 0.3, Vector3(0, 0.0, 0), Color(0.12, 0.1, 0.09), 80, 0.1, 0.3)  # ash
+	_prop_meshes["campfire"] = fire.commit()
+	var flame := SurfaceTool.new()
+	flame.begin(Mesh.PRIMITIVE_TRIANGLES)
+	LowPoly.add_cylinder(flame, 0.0, 0.34, 0.9, 6, Vector3(0, 0.45, 0), Color(1.0, 0.45, 0.1))
+	LowPoly.add_cylinder(flame, 0.0, 0.22, 0.75, 5, Vector3(0.12, 0.4, 0.05), Color(1.0, 0.75, 0.25))
+	LowPoly.add_cylinder(flame, 0.0, 0.18, 0.55, 5, Vector3(-0.12, 0.3, -0.06), Color(1.0, 0.9, 0.5))
+	_flame_mesh = flame.commit()
+	_flame_material = LowPoly.make_material()
+	_flame_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_flame_material.emission_enabled = true
+	_flame_material.emission = Color(1.0, 0.5, 0.15)
 
 	# Crafting bench: a plank table on four legs, with a hammer and a block of stone on top.
 	var bench := SurfaceTool.new()

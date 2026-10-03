@@ -25,6 +25,7 @@ var _continue_button: Button
 var _world_list: VBoxContainer
 var _name_edit: LineEdit
 var _seed_edit: LineEdit
+var _horror_check: CheckButton
 var _settings: Control
 var _confirm: ConfirmationDialog
 var _update_button: Button
@@ -75,6 +76,7 @@ func _show_page(page: String) -> void:
 		"create":
 			_name_edit.text = "World %d" % (SaveGame.list_worlds().size() + 1)
 			_seed_edit.text = ""
+			_horror_check.button_pressed = false
 			_name_edit.grab_focus()
 			_name_edit.select_all()
 		"settings":
@@ -90,7 +92,7 @@ func _create_world() -> void:
 	var world_name := _name_edit.text.strip_edges()
 	if world_name == "":
 		world_name = "New World"
-	_play(SaveGame.create_world(world_name, SaveGame.seed_from_text(_seed_edit.text)))
+	_play(SaveGame.create_world(world_name, SaveGame.seed_from_text(_seed_edit.text), _horror_check.button_pressed))
 
 
 func _ask_delete(world: Dictionary) -> void:
@@ -116,6 +118,10 @@ func _refresh_world_list() -> void:
 		var details := UI.label("Seed %d  •  Last played %s" % [world["world_seed"], _pretty_date(world["saved_at"])], 15)
 		details.modulate = UI.SOFT_TEXT_COLOR
 		info.add_child(details)
+		if world["horror"]:
+			var tag := UI.label("Horror mode", 15)
+			tag.add_theme_color_override("font_color", Color(0.9, 0.3, 0.25))
+			info.add_child(tag)
 		row.add_child(info)
 		row.add_child(UI.button("Play", _play.bind(world["id"]), 110))
 		row.add_child(UI.button("Delete", _ask_delete.bind(world), 110))
@@ -233,6 +239,13 @@ func _build_ui() -> void:
 	var hint := UI.label("The same seed always makes the same world,\nso you can share good ones with friends.", 16)
 	hint.modulate = UI.SOFT_TEXT_COLOR
 	create.add_child(hint)
+	_horror_check = CheckButton.new()
+	_horror_check.text = "Horror mode"
+	_horror_check.add_theme_color_override("font_pressed_color", Color(0.95, 0.35, 0.3))
+	create.add_child(_horror_check)
+	var horror_hint := UI.label("Fog, pitch-black nights and monsters that hunt you.\nCan't be changed later.", 15)
+	horror_hint.modulate = UI.SOFT_TEXT_COLOR
+	create.add_child(horror_hint)
 	var create_buttons := HBoxContainer.new()
 	create_buttons.alignment = BoxContainer.ALIGNMENT_CENTER
 	create_buttons.add_child(UI.button("Create World", _create_world, 220))

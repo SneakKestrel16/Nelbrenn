@@ -240,8 +240,12 @@ func worn_color(slot: String) -> Variant:
 	return null if entry == null else Items.get_info(entry["id"]).get("color")
 
 
-func give_starter_items() -> void:
+## A new world's kit. Horror worlds also get a lantern and a campfire.
+func give_starter_items(horror := false) -> void:
 	clear()
+	if horror:
+		hotbar[4] = {"id": "lantern", "count": 1}
+		hotbar[5] = {"id": "campfire", "count": 1}
 	equip_new("leather_tunic")
 	equip_new("leather_boots")
 	hotbar[0] = {"id": "stone_axe", "count": 1}

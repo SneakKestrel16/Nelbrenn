@@ -11,6 +11,8 @@ const Items := preload("res://scripts/items.gd")
 
 const RECIPES := [
 	{"id": "crafting_bench", "group": "Building", "hand": true, "needs": {"wood": 8, "stone": 4}},
+	{"id": "campfire", "group": "Building", "hand": true, "needs": {"wood": 6, "stone": 3}},
+	{"id": "lantern", "group": "Tools", "needs": {"copper_bar": 1, "coal": 2}},
 
 	{"id": "stone_axe", "group": "Tools", "hand": true, "needs": {"wood": 3, "stone": 3}},
 	{"id": "stone_pickaxe", "group": "Tools", "hand": true, "needs": {"wood": 3, "stone": 3}},

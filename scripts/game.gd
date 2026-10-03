@@ -14,6 +14,7 @@ const GatheringScript := preload("res://scripts/gathering.gd")
 const VitalsScript := preload("res://scripts/vitals.gd")
 const HudScript := preload("res://scripts/hud.gd")
 const CraftingUIScript := preload("res://scripts/crafting_ui.gd")
+const HorrorScript := preload("res://scripts/horror.gd")
 const Items := preload("res://scripts/items.gd")
 
 @export var autosave_seconds := 30.0
@@ -21,6 +22,7 @@ const Items := preload("res://scripts/items.gd")
 var world_id := ""
 var world_name := ""
 var world_seed := 0
+var horror := false  ## Horror mode: fog, dark nights and monsters (see horror.gd).
 
 var world  # world.gd
 var player  # player.gd
@@ -50,7 +52,8 @@ func _ready() -> void:
 	var save := SaveGame.read(world_id)
 	world_seed = int(save.get("world_seed", 1337))
 	world_name = String(save.get("name", "World"))
-	for key in ["name", "world_seed", "created_at"]:
+	horror = bool(save.get("horror", false))
+	for key in ["name", "world_seed", "horror", "created_at"]:
 		if save.has(key):
 			_save_info[key] = save[key]
 
@@ -67,6 +70,7 @@ func _ready() -> void:
 	day_night.name = "DayNight"
 	day_night.sun = _sun
 	day_night.world_environment = env
+	day_night.horror = horror
 	if save.has("time_of_day"):
 		day_night.time_of_day = float(save["time_of_day"])
 	add_child(day_night)
@@ -99,7 +103,7 @@ func _ready() -> void:
 	if save.has("inventory"):
 		inventory.apply_save_data(save["inventory"])
 	else:
-		inventory.give_starter_items()
+		inventory.give_starter_items(horror)
 
 	vitals = VitalsScript.new()
 	vitals.name = "Vitals"
@@ -143,6 +147,16 @@ func _ready() -> void:
 	add_child(crafting_ui)
 	gathering.use_structure.connect(crafting_ui.open)
 
+	if horror:
+		var director := HorrorScript.new()
+		director.name = "Horror"
+		director.world = world
+		director.player = player
+		director.vitals = vitals
+		director.day_night = day_night
+		director.game = self
+		add_child(director)
+
 	var ambience := AmbienceScript.new()
 	ambience.name = "Ambience"
 	ambience.listener = player
@@ -168,7 +182,7 @@ func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	if is_new:
 		save_game(false)
-		show_message("Welcome to %s!" % world_name)
+		show_message("Welcome to %s... you are not alone here." % world_name if horror else "Welcome to %s!" % world_name)
 	else:
 		show_message("Welcome back to %s!" % world_name)
 

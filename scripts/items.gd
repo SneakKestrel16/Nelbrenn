@@ -146,6 +146,15 @@ const ITEMS := {
 		"name": "Fruit Salad", "slot": "", "icon": "bowl", "color": Color(0.85, 0.30, 0.30),
 		"max_stack": 10, "food": 45, "description": "Apples and berries. Very filling.",
 	},
+	"lantern": {
+		"name": "Lantern", "slot": "", "icon": "lantern", "color": Color(1.0, 0.75, 0.35),
+		"light": true, "description": "Hold it on the hotbar to light up the dark. Shades hate it.",
+	},
+	"campfire": {
+		"name": "Campfire", "slot": "", "icon": "campfire", "color": Color(1.0, 0.55, 0.2),
+		"max_stack": 5, "place": "campfire",
+		"description": "Right-click to build it. Burns forever; monsters won't come near its light.",
+	},
 	"crafting_bench": {
 		"name": "Crafting Bench", "slot": "", "icon": "bench", "color": Color(0.62, 0.45, 0.27),
 		"max_stack": 5, "place": "crafting_bench",

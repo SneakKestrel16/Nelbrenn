@@ -47,6 +47,10 @@ var _leg_l: MeshInstance3D
 var _leg_r: MeshInstance3D
 var _held: Node3D  ## The item in the right hand.
 var _held_id := ""
+var _held_light: OmniLight3D  ## Set while holding a lantern.
+
+var _noise := 0.0   ## How far away the last loud thing you did could be heard (m).
+var _shake := 0.0
 
 var _walk_phase := 0.0
 var _walk_amount := 0.0
@@ -152,6 +156,40 @@ func _physics_process(delta: float) -> void:
 
 func _process(delta: float) -> void:
 	_animate(delta)
+	_noise = maxf(_noise - 25.0 * delta, 0.0)
+	if _held_light:
+		var t := Time.get_ticks_msec() * 0.001
+		_held_light.light_energy = 2.2 + sin(t * 9.0) * 0.12 + sin(t * 23.0) * 0.08
+	# Camera shake (when something hits you).
+	_shake = maxf(_shake - delta * 2.5, 0.0)
+	_camera.h_offset = randf_range(-1.0, 1.0) * _shake * 0.25
+	_camera.v_offset = randf_range(-1.0, 1.0) * _shake * 0.25
+
+
+## How far away monsters can hear you right now, in metres: sprinting is
+## loud, walking is quiet, standing still is silent, chopping and mining
+## carry a long way.
+func get_noise() -> float:
+	var speed := Vector2(velocity.x, velocity.z).length()
+	var moving := 0.0
+	if speed > WALK_SPEED * 1.2:
+		moving = 45.0
+	elif speed > 1.0:
+		moving = 14.0
+	return maxf(moving, _noise)
+
+
+func make_noise(radius: float) -> void:
+	_noise = maxf(_noise, radius)
+
+
+## True while holding a lit lantern.
+func has_light() -> bool:
+	return _held_light != null
+
+
+func shake(strength: float) -> void:
+	_shake = maxf(_shake, strength)
 
 
 func set_fov(degrees: float) -> void:
@@ -173,6 +211,7 @@ func swing_at(pos: Vector3) -> void:
 	if to.length() > 0.01:
 		_model.rotation.y = atan2(-to.x, -to.z)
 	_swing_left = SWING_TIME
+	make_noise(35.0)
 
 
 ## Raises the held food to the mouth.
@@ -346,7 +385,11 @@ func set_held(id: String, info: Dictionary) -> void:
 	_held_id = id
 	for child in _held.get_children():
 		child.queue_free()
+	_held_light = null
 	if id == "":
+		return
+	if info.get("light", false):
+		_hold_lantern(info)
 		return
 	var color: Color = info.get("color", Color.WHITE)
 	var wood := Color(0.50, 0.34, 0.20)
@@ -373,6 +416,40 @@ func set_held(id: String, info: Dictionary) -> void:
 			else:
 				item.mesh = _mesh(func(st: SurfaceTool) -> void: LowPoly.add_blob(st, 0.11, Vector3(0, 0.08, 0), color, 7, 0.08))
 	_held.add_child(item)
+
+
+## A lantern hanging from the hand, with a warm flickering light.
+func _hold_lantern(info: Dictionary) -> void:
+	var lantern := Node3D.new()
+	lantern.rotation.x = 1.0  # Undo the hand's tilt so it hangs straight down.
+	_held.add_child(lantern)
+	var frame := Color(0.25, 0.23, 0.21)
+	var build := func(st: SurfaceTool) -> void:
+		LowPoly.add_limb(st, Vector3(0, 0.0, 0), Vector3(0, -0.12, 0), 0.012, 0.012, 3, frame)       # handle
+		LowPoly.add_cylinder(st, 0.08, 0.1, 0.05, 6, Vector3(0, -0.14, 0), frame)                  # top
+		LowPoly.add_cylinder(st, 0.1, 0.1, 0.04, 6, Vector3(0, -0.38, 0), frame)                   # base
+		for i in 4:
+			var a := TAU * i / 4.0 + PI / 4.0
+			LowPoly.add_limb(st, Vector3(cos(a) * 0.085, -0.16, sin(a) * 0.085), Vector3(cos(a) * 0.085, -0.36, sin(a) * 0.085), 0.012, 0.012, 3, frame)
+	var body := MeshInstance3D.new()
+	body.mesh = _mesh(build)
+	body.material_override = _material
+	lantern.add_child(body)
+	var glow_material := LowPoly.make_material()
+	glow_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	var glow := MeshInstance3D.new()
+	glow.mesh = _mesh(func(st: SurfaceTool) -> void: LowPoly.add_cylinder(st, 0.07, 0.07, 0.19, 6, Vector3(0, -0.26, 0), info["color"].lightened(0.3)))
+	glow.material_override = glow_material
+	glow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	lantern.add_child(glow)
+	_held_light = OmniLight3D.new()
+	_held_light.light_color = Color(1.0, 0.75, 0.45)
+	_held_light.omni_range = 18.0
+	_held_light.omni_attenuation = 1.1
+	# No shadows: right next to the body they'd throw huge streaks across the ground.
+	_held_light.shadow_enabled = false
+	_held_light.position.y = -0.26
+	lantern.add_child(_held_light)
 
 
 func get_save_data() -> Dictionary:

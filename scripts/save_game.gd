@@ -12,7 +12,7 @@ static var current_world_id := ""
 
 
 ## All saved worlds, most recently played first. Each is
-## {"id", "name", "world_seed", "saved_at"}.
+## {"id", "name", "world_seed", "saved_at", "horror"}.
 static func list_worlds() -> Array[Dictionary]:
 	_migrate_old_save()
 	var worlds: Array[Dictionary] = []
@@ -28,13 +28,15 @@ static func list_worlds() -> Array[Dictionary]:
 			"name": String(data.get("name", id)),
 			"world_seed": int(data.get("world_seed", 0)),
 			"saved_at": String(data.get("saved_at", "")),
+			"horror": bool(data.get("horror", false)),
 		})
 	worlds.sort_custom(func(a, b): return a["saved_at"] > b["saved_at"])
 	return worlds
 
 
-## Makes a new, empty world file and returns its id.
-static func create_world(world_name: String, world_seed: int) -> String:
+## Makes a new, empty world file and returns its id. Horror worlds have
+## fog, dark nights and monsters.
+static func create_world(world_name: String, world_seed: int, horror := false) -> String:
 	DirAccess.make_dir_recursive_absolute(WORLDS_DIR)
 	var base := _file_safe(world_name)
 	var id := base
@@ -43,7 +45,7 @@ static func create_world(world_name: String, world_seed: int) -> String:
 		id = "%s_%d" % [base, n]
 		n += 1
 	var now := Time.get_datetime_string_from_system()
-	write(id, {"name": world_name, "world_seed": world_seed, "created_at": now, "saved_at": now})
+	write(id, {"name": world_name, "world_seed": world_seed, "horror": horror, "created_at": now, "saved_at": now})
 	return id
 
 

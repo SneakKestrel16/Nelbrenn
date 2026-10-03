@@ -77,8 +77,11 @@ func use_held_item() -> void:
 		world.place_structure(info["place"], pos, atan2(look.x, look.z))
 		inventory.consume_selected()
 		Settings.play_click()
-		game.show_message("Built a %s. Press %s at it to craft." % [info["name"],
-				Settings.key_name(Settings.get_binding("gather", 0))])
+		if info["place"] == "crafting_bench":
+			game.show_message("Built a %s. Press %s at it to craft." % [info["name"],
+					Settings.key_name(Settings.get_binding("gather", 0))])
+		else:
+			game.show_message("Built a %s." % info["name"])
 	elif info.get("food", 0) > 0 and vitals.eat(id):
 		inventory.consume_selected()
 		player.eat_animation()

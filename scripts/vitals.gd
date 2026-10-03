@@ -4,6 +4,9 @@ extends Node
 ## comes back by itself; if you starve it drains away, and at zero you
 ## faint and wake up back at the world's starting point (keeping your items).
 
+signal damaged(amount: float)
+signal fainted
+
 const Items := preload("res://scripts/items.gd")
 
 const MAX := 100.0
@@ -56,19 +59,25 @@ func eat(id: String) -> bool:
 	return true
 
 
-func hurt(amount: float) -> void:
+## Takes `amount` health. `cause` names what did it ("" means hunger).
+func hurt(amount: float, cause := "") -> void:
 	health -= amount
+	damaged.emit(amount)
 	if health <= 0.0:
-		_faint()
+		_faint(cause)
 
 
-func _faint() -> void:
+func _faint(cause: String) -> void:
 	health = MAX
-	hunger = MAX * 0.5
+	hunger = maxf(hunger, MAX * 0.5)
 	player.global_position = world.find_spawn_point()
 	player.velocity = Vector3.ZERO
 	world.generate_around(player.global_position, true)  # Ground to land on.
-	game.show_message("You fainted from hunger... and woke up back where you started.")
+	if cause == "":
+		game.show_message("You fainted from hunger... and woke up back where you started.")
+	else:
+		game.show_message("You were killed by %s... and woke up back where you started." % cause)
+	fainted.emit()
 
 
 func get_save_data() -> Dictionary:

@@ -33,7 +33,8 @@ The game opens on the **main menu**:
 - **Worlds** lists your saved worlds. Play or delete them, or **Create New
   World**. Give it a name and, if you like, a seed. Leave the seed empty for
   a random world. The same seed always makes the same world, and words work
-  as seeds too.
+  as seeds too. Switch on **Horror mode** for a world full of monsters (see
+  below).
 - **Settings** and **Quit**.
 
 | Key (default) | Action |
@@ -44,13 +45,38 @@ The game opens on the **main menu**:
 | Space | Jump / swim up |
 | 1–8 / mouse wheel | Pick a hotbar slot (the item goes in your hand) |
 | E / left click (hold) | Chop, mine or pick what's in front of you |
-| F / right click | Eat the food in your hand, or build the bench in your hand |
+| F / right click | Eat the food in your hand, or build the bench / campfire in your hand |
 | E / left click (at a bench) | Open the crafting menu |
 | I / Tab | Open or close the inventory |
 | F5 | Quick save |
 | Esc | Pause menu (resume, settings, save, quit) |
 
 All keys except Esc can be changed in **Settings → Controls**.
+
+## Horror mode
+
+Tick **Horror mode** when creating a world (it can't be changed later; your
+other worlds are unaffected). Days are grey and foggy, nights are pitch black,
+and you can hear things out there. You start with a **lantern** and a
+**campfire** on the hotbar.
+
+- **Lantern:** hold it on the hotbar to light up the dark (make more at a
+  crafting bench: 1 copper bar, 2 coal).
+- **Campfire:** right-click to build it (craft by hand: 6 wood, 3 stone).
+  It burns forever, and no monster will come within about 10 m of it.
+
+The monsters, each with its own way of hunting you:
+
+| Monster | When | How it works | How to survive |
+| --- | --- | --- | --- |
+| **The Watcher** | Night | Tall and pale. Only moves while you're not facing it, and slips around behind you. If it reaches you: a jump scare and heavy damage. | Turn and face it. Keep it in view for a few seconds and it gives up and vanishes. |
+| **Crawler** | Night | Fast and blind; hunts by sound. Sprinting, chopping and mining carry far, walking only a little. | Walk, don't run. Stand still. It can't swim. |
+| **Shade** | Night | A floating shadow that drains your health while it's close. | Hold your lantern; it won't come near the light. |
+| **Mimic** | Day and night | Looks exactly like a berry bush, until you walk up to it. Then it jumps up on legs and chases you. | Real bushes show a **Pick** prompt; a Mimic doesn't. |
+
+At sunrise the night creatures crawl back into the dark. If one of them
+kills you, you wake up back at the start, keeping all your items. A
+heartbeat speeds up when something is close.
 
 ## Settings
 
@@ -178,6 +204,9 @@ from before multiple worlds existed is moved in automatically as
 | `scripts/recipes.gd` | Every crafting recipe |
 | `scripts/crafting_ui.gd` | The crafting bench menu |
 | `scripts/vitals.gd` | Health and hunger, eating, and fainting |
+| `scripts/horror.gd` | Horror mode: spawns monsters, the dark vignette, drone, heartbeat, jump scare |
+| `scripts/monster.gd` | The four monsters: how they look and hunt |
+| `scripts/horror_sounds.gd` | All the horror sounds, made in code |
 | `scripts/player.gd` | Player movement, swimming and the third-person camera |
 | `scripts/day_night.gd` | Sun movement and sky colours over the day |
 | `scripts/ambience.gd` | Wind sound, made in code, louder up high |
