@@ -1,6 +1,10 @@
 extends CharacterBody3D
 ## Third-person explorer. WASD to move, Shift to sprint, Space to jump,
 ## mouse to look around. Keys and mouse settings come from the Settings autoload.
+##
+## The character is built in code from low-poly parts (body, head, two arms,
+## two legs). Each limb hangs from a joint, so it can swing while walking,
+## chop, eat and swim.
 
 const LowPoly := preload("res://scripts/low_poly.gd")
 
@@ -12,6 +16,16 @@ const GRAVITY := 22.0
 const MOUSE_SENSITIVITY := 0.0025
 const WATER_LEVEL := 0.0
 
+const SWING_TIME := 0.35  ## One chop / mining swing, in seconds.
+const EAT_TIME := 0.5
+
+const SKIN := Color(0.95, 0.78, 0.62)
+const HAIR := Color(0.38, 0.24, 0.13)
+const DEFAULT_TUNIC := Color(0.75, 0.25, 0.20)
+const DEFAULT_TROUSERS := Color(0.25, 0.32, 0.55)
+const DEFAULT_SHOES := Color(0.30, 0.20, 0.12)
+const HAT := Color(0.30, 0.55, 0.30)
+
 ## Turned off while a menu (like the inventory) is open.
 var controls_enabled := true
 ## Percent bonuses from worn equipment.
@@ -21,9 +35,24 @@ var jump_bonus := 0.0
 var _camera_yaw: Node3D
 var _camera_pitch: Node3D
 var _camera: Camera3D
-var _model: Node3D
-var _held: Node3D  ## The item in the player's hand.
+
+var _material: StandardMaterial3D
+var _model: Node3D  ## Turns to face where you walk.
+var _body: Node3D   ## Bobs up and down while walking.
+var _torso: MeshInstance3D
+var _head: MeshInstance3D
+var _arm_l: MeshInstance3D  ## Limbs hang from their joint (shoulder / hip).
+var _arm_r: MeshInstance3D
+var _leg_l: MeshInstance3D
+var _leg_r: MeshInstance3D
+var _held: Node3D  ## The item in the right hand.
 var _held_id := ""
+
+var _walk_phase := 0.0
+var _walk_amount := 0.0
+var _swing_left := 0.0
+var _eat_left := 0.0
+var _swimming := false
 
 
 func _ready() -> void:
@@ -35,14 +64,8 @@ func _ready() -> void:
 	collision.position.y = 0.9
 	add_child(collision)
 
-	_model = MeshInstance3D.new()
-	_model.material_override = LowPoly.make_material()
+	_build_model()
 	set_look({})
-	add_child(_model)
-	_held = Node3D.new()
-	_held.position = Vector3(0.45, 0.95, -0.15)  # Right hand (the model faces -Z).
-	_held.rotation.x = -0.5
-	_model.add_child(_held)
 
 	_camera_yaw = Node3D.new()
 	_camera_yaw.position.y = 1.6
@@ -82,6 +105,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _physics_process(delta: float) -> void:
 	var swimming := global_position.y + 1.0 < WATER_LEVEL
+	_swimming = swimming
 
 	var input := Vector2.ZERO
 	if controls_enabled:
@@ -126,6 +150,10 @@ func _physics_process(delta: float) -> void:
 			velocity = Vector3.ZERO
 
 
+func _process(delta: float) -> void:
+	_animate(delta)
+
+
 func set_fov(degrees: float) -> void:
 	_camera.fov = degrees
 
@@ -139,22 +167,177 @@ func get_look_direction() -> Vector3:
 	return -_camera_yaw.global_basis.z
 
 
-## Turns to face `pos` and leans in for a quick chop / swing.
+## Turns to face `pos` and swings the right arm (chopping / mining).
 func swing_at(pos: Vector3) -> void:
 	var to := pos - global_position
 	if to.length() > 0.01:
 		_model.rotation.y = atan2(-to.x, -to.z)
-	var tween := create_tween()
-	tween.tween_property(_model, "rotation:x", -0.35, 0.08)
-	tween.tween_property(_model, "rotation:x", 0.0, 0.18)
+	_swing_left = SWING_TIME
 
 
 ## Raises the held food to the mouth.
 func eat_animation() -> void:
-	var tween := create_tween()
-	tween.tween_property(_held, "position", Vector3(0.15, 1.6, -0.35), 0.12)
-	tween.tween_property(_held, "position", Vector3(0.45, 0.95, -0.15), 0.2).set_delay(0.15)
+	_eat_left = EAT_TIME
 
+
+# --- Animation ---------------------------------------------------------------
+
+## Poses the limbs every frame: walking and running swing the arms and legs,
+## jumping tucks the legs, swimming paddles, and chopping / eating move the
+## right arm.
+func _animate(delta: float) -> void:
+	var ground_speed := Vector2(velocity.x, velocity.z).length()
+	_walk_amount = move_toward(_walk_amount, clampf(ground_speed / WALK_SPEED, 0.0, 1.5), delta * 5.0)
+	_walk_phase += delta * ground_speed * 1.5
+	var stride := sin(_walk_phase) * 0.75 * minf(_walk_amount, 1.25)
+
+	var leg_l := stride
+	var leg_r := -stride
+	var arm_l := -stride * 0.8
+	var arm_r := stride * 0.8
+	var arm_out := 0.1  # Arms held slightly away from the body.
+	var bob := absf(sin(_walk_phase)) * 0.07 * minf(_walk_amount, 1.0)
+	var t := Time.get_ticks_msec() * 0.001
+
+	if _swimming:
+		var paddle := sin(t * 5.0)
+		arm_l = 1.4 + paddle * 0.9
+		arm_r = 1.4 - paddle * 0.9
+		arm_out = 0.5
+		leg_l = 0.3 + sin(t * 8.0) * 0.4
+		leg_r = 0.3 - sin(t * 8.0) * 0.4
+		bob = 0.0
+	elif not is_on_floor():
+		leg_l = 0.7
+		leg_r = -0.25
+		arm_l = 0.4
+		arm_r = 0.4
+		arm_out = 0.55
+		bob = 0.0
+	elif _walk_amount < 0.05:
+		# Standing still: breathe gently.
+		arm_l = sin(t * 1.6) * 0.03
+		arm_r = -arm_l
+
+	var lean := 0.0
+	if _swing_left > 0.0:
+		_swing_left -= delta
+		var p := 1.0 - maxf(_swing_left, 0.0) / SWING_TIME
+		# Lift the arm over the shoulder, then bring it down hard.
+		arm_r = lerpf(0.3, 2.7, ease(p / 0.4, 0.5)) if p < 0.4 else lerpf(2.7, 0.5, ease((p - 0.4) / 0.6, 0.4))
+		lean = -sin(p * PI) * 0.12
+	elif _eat_left > 0.0:
+		_eat_left -= delta
+		var p := 1.0 - maxf(_eat_left, 0.0) / EAT_TIME
+		arm_r = sin(p * PI) * 2.1
+
+	var k := 1.0 - exp(-18.0 * delta)
+	_leg_l.rotation.x = lerpf(_leg_l.rotation.x, leg_l, k)
+	_leg_r.rotation.x = lerpf(_leg_r.rotation.x, leg_r, k)
+	_arm_l.rotation.x = lerpf(_arm_l.rotation.x, arm_l, k)
+	_arm_l.rotation.z = lerpf(_arm_l.rotation.z, -arm_out, k)
+	_arm_r.rotation.z = lerpf(_arm_r.rotation.z, arm_out if _eat_left <= 0.0 else -0.45, k)
+	_arm_r.rotation.x = arm_r if _swing_left > 0.0 or _eat_left > 0.0 else lerpf(_arm_r.rotation.x, arm_r, k)
+	_body.position.y = bob
+	_body.rotation.x = lean
+
+
+# --- Building the character ---------------------------------------------------
+
+func _build_model() -> void:
+	_material = LowPoly.make_material()
+	_model = Node3D.new()
+	add_child(_model)
+	_body = Node3D.new()
+	_model.add_child(_body)
+	# The model faces -Z, so the character's right is +X.
+	_torso = _part(_body, Vector3.ZERO)
+	_head = _part(_body, Vector3(0, 1.47, 0))
+	_arm_l = _part(_body, Vector3(-0.33, 1.38, 0))
+	_arm_r = _part(_body, Vector3(0.33, 1.38, 0))
+	_leg_l = _part(_body, Vector3(-0.12, 0.84, 0))
+	_leg_r = _part(_body, Vector3(0.12, 0.84, 0))
+	_held = Node3D.new()
+	_held.position = Vector3(0, -0.62, -0.02)  # In the right hand...
+	_held.rotation.x = -1.0                      # ...with the handle pointing forward and up.
+	_arm_r.add_child(_held)
+
+
+func _part(parent: Node3D, joint: Vector3) -> MeshInstance3D:
+	var part := MeshInstance3D.new()
+	part.material_override = _material
+	part.position = joint
+	parent.add_child(part)
+	return part
+
+
+## Builds a mesh with `build(st)`.
+static func _mesh(build: Callable) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	build.call(st)
+	return st.commit()
+
+
+## Rebuilds the character, coloured by worn equipment.
+## colors maps an equipment slot ("head", "chest", ...) to the worn item's colour.
+func set_look(colors: Dictionary) -> void:
+	var tunic: Color = colors.get("chest", DEFAULT_TUNIC)
+	var trousers: Color = colors.get("legs", DEFAULT_TROUSERS)
+	var shoes: Color = colors.get("feet", DEFAULT_SHOES)
+	var hands: Color = colors.get("hands", SKIN)
+
+	var build_torso := func(st: SurfaceTool) -> void:
+		LowPoly.add_cylinder(st, 0.21, 0.2, 0.16, 8, Vector3(0, 0.86, 0), trousers, 0.05)          # hips
+		LowPoly.add_cylinder(st, 0.27, 0.22, 0.56, 8, Vector3(0, 1.17, 0), tunic, 0.05)            # tunic
+		LowPoly.add_cylinder(st, 0.245, 0.235, 0.07, 8, Vector3(0, 0.93, 0), tunic.darkened(0.45))  # belt
+		LowPoly.add_box(st, Vector3(0.08, 0.07, 0.03), Vector3(0, 0.93, -0.245), Color(0.85, 0.72, 0.35))  # buckle
+		for side in [-1.0, 1.0]:
+			LowPoly.add_blob(st, 0.12, Vector3(side * 0.29, 1.37, 0), tunic, 3, 0.05, 0.85)       # shoulders
+		LowPoly.add_cylinder(st, 0.075, 0.085, 0.12, 6, Vector3(0, 1.47, 0), SKIN)                # neck
+		if colors.has("neck"):
+			LowPoly.add_blob(st, 0.065, Vector3(0, 1.3, -0.27), colors["neck"], 4, 0.1)           # amulet
+			LowPoly.add_limb(st, Vector3(-0.1, 1.44, -0.16), Vector3(0, 1.33, -0.265), 0.012, 0.012, 3, Color(0.3, 0.25, 0.2))
+			LowPoly.add_limb(st, Vector3(0.1, 1.44, -0.16), Vector3(0, 1.33, -0.265), 0.012, 0.012, 3, Color(0.3, 0.25, 0.2))
+	_torso.mesh = _mesh(build_torso)
+
+	var build_head := func(st: SurfaceTool) -> void:
+		LowPoly.add_blob(st, 0.21, Vector3(0, 0.2, 0), SKIN, 5, 0.03, 1.05, 1)
+		for side in [-1.0, 1.0]:
+			LowPoly.add_box(st, Vector3(0.045, 0.06, 0.03), Vector3(side * 0.075, 0.23, -0.19), Color(0.12, 0.09, 0.07))  # eyes
+			LowPoly.add_box(st, Vector3(0.07, 0.02, 0.03), Vector3(side * 0.075, 0.285, -0.185), HAIR)                    # brows
+			LowPoly.add_blob(st, 0.045, Vector3(side * 0.205, 0.19, 0.0), SKIN.darkened(0.05), 6)                          # ears
+		LowPoly.add_limb(st, Vector3(0, 0.22, -0.19), Vector3(0, 0.15, -0.25), 0.03, 0.035, 4, SKIN.darkened(0.08))          # nose
+		LowPoly.add_box(st, Vector3(0.07, 0.015, 0.02), Vector3(0, 0.1, -0.195), Color(0.55, 0.3, 0.25))                     # mouth
+		if colors.has("head"):  # helmet
+			LowPoly.add_blob(st, 0.245, Vector3(0, 0.25, 0.01), colors["head"], 8, 0.06, 0.8, 1)
+			LowPoly.add_cylinder(st, 0.25, 0.26, 0.05, 10, Vector3(0, 0.2, 0.01), colors["head"].darkened(0.25))
+		else:  # hair and the usual pointy hat
+			LowPoly.add_blob(st, 0.205, Vector3(0, 0.26, 0.05), HAIR, 9, 0.06, 0.9)
+			LowPoly.add_blob(st, 0.18, Vector3(0, 0.15, 0.07), HAIR, 12, 0.06, 1.0)  # back of the head
+			LowPoly.add_cylinder(st, 0.35, 0.35, 0.035, 12, Vector3(0, 0.36, 0.01), HAT.darkened(0.1), 0.05)  # brim
+			LowPoly.add_cylinder(st, 0.2, 0.21, 0.07, 10, Vector3(0, 0.41, 0.01), HAT.darkened(0.4))         # band
+			LowPoly.add_limb(st, Vector3(0, 0.38, 0.01), Vector3(0, 0.62, 0.04), 0.2, 0.12, 8, HAT, 0.05)
+			LowPoly.add_limb(st, Vector3(0, 0.62, 0.04), Vector3(0.0, 0.84, 0.14), 0.12, 0.0, 8, HAT, 0.05)  # floppy tip
+	_head.mesh = _mesh(build_head)
+
+	var build_arm := func(st: SurfaceTool) -> void:
+		LowPoly.add_limb(st, Vector3(0, 0.02, 0), Vector3(0, -0.3, 0), 0.085, 0.075, 6, tunic, 0.05)   # sleeve
+		LowPoly.add_limb(st, Vector3(0, -0.3, 0), Vector3(0, -0.53, 0), 0.068, 0.06, 6, SKIN, 0.03)    # forearm
+		LowPoly.add_cylinder(st, 0.08, 0.075, 0.05, 6, Vector3(0, -0.29, 0), tunic.darkened(0.2))      # cuff
+		LowPoly.add_blob(st, 0.075, Vector3(0, -0.6, -0.01), hands, 10, 0.04)                          # hand
+	_arm_l.mesh = _mesh(build_arm)
+	_arm_r.mesh = _arm_l.mesh
+
+	var build_leg := func(st: SurfaceTool) -> void:
+		LowPoly.add_limb(st, Vector3(0, 0.03, 0), Vector3(0, -0.66, 0), 0.11, 0.085, 6, trousers, 0.05)
+		LowPoly.add_box(st, Vector3(0.17, 0.14, 0.28), Vector3(0, -0.76, -0.04), shoes)                  # boot
+		LowPoly.add_cylinder(st, 0.1, 0.095, 0.1, 6, Vector3(0, -0.66, 0), shoes.darkened(0.1))          # boot top
+	_leg_l.mesh = _mesh(build_leg)
+	_leg_r.mesh = _leg_l.mesh
+
+
+# --- The held item -------------------------------------------------------------
 
 ## Shows item `id` (from items.gd) in the player's hand, or nothing for "".
 func set_held(id: String, info: Dictionary) -> void:
@@ -167,31 +350,29 @@ func set_held(id: String, info: Dictionary) -> void:
 		return
 	var color: Color = info.get("color", Color.WHITE)
 	var wood := Color(0.50, 0.34, 0.20)
+	var item := MeshInstance3D.new()
+	item.material_override = _material
+	var build_axe := func(st: SurfaceTool) -> void:
+		LowPoly.add_limb(st, Vector3(0, -0.15, 0), Vector3(0, 0.62, 0), 0.035, 0.03, 5, wood, 0.06)
+		# Blade: a wedge sticking out forward near the top, wide at the edge.
+		LowPoly.add_limb(st, Vector3(0, 0.5, -0.02), Vector3(0, 0.5, -0.3), 0.07, 0.15, 4, color, 0.1)
+	var build_pickaxe := func(st: SurfaceTool) -> void:
+		LowPoly.add_limb(st, Vector3(0, -0.15, 0), Vector3(0, 0.62, 0), 0.035, 0.03, 5, wood, 0.06)
+		# Head: a curved spike to the front and a shorter one to the back.
+		LowPoly.add_limb(st, Vector3(0, 0.6, 0), Vector3(0, 0.56, -0.22), 0.06, 0.045, 5, color, 0.1)
+		LowPoly.add_limb(st, Vector3(0, 0.56, -0.22), Vector3(0, 0.45, -0.36), 0.045, 0.0, 5, color, 0.1)
+		LowPoly.add_limb(st, Vector3(0, 0.6, 0), Vector3(0, 0.55, 0.22), 0.06, 0.0, 5, color, 0.1)
 	match info.get("tool", ""):
 		"axe":
-			_held_part(func(st): LowPoly.add_cylinder(st, 0.035, 0.04, 0.8, 5, Vector3.ZERO, wood), Vector3(0, 0.25, 0), 0.0)
-			# Blade: a wedge sticking out forward near the top.
-			_held_part(func(st): LowPoly.add_cylinder(st, 0.15, 0.04, 0.28, 4, Vector3.ZERO, color), Vector3(0, 0.55, -0.14), -PI / 2)
+			item.mesh = _mesh(build_axe)
 		"pickaxe":
-			_held_part(func(st): LowPoly.add_cylinder(st, 0.035, 0.04, 0.8, 5, Vector3.ZERO, wood), Vector3(0, 0.25, 0), 0.0)
-			# Head: two spikes, one pointing forward and one back.
-			_held_part(func(st): LowPoly.add_cylinder(st, 0.0, 0.06, 0.32, 4, Vector3.ZERO, color), Vector3(0, 0.62, -0.16), -PI / 2)
-			_held_part(func(st): LowPoly.add_cylinder(st, 0.0, 0.06, 0.32, 4, Vector3.ZERO, color), Vector3(0, 0.62, 0.16), PI / 2)
+			item.mesh = _mesh(build_pickaxe)
 		_:
-			_held_part(func(st): LowPoly.add_blob(st, 0.12, Vector3.ZERO, color, 7), Vector3(0, 0.08, 0), 0.0)
-
-
-## One piece of the held item, built by `build` and tipped over by `tilt` around X.
-func _held_part(build: Callable, pos: Vector3, tilt: float) -> void:
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	build.call(st)
-	var part := MeshInstance3D.new()
-	part.mesh = st.commit()
-	part.material_override = _model.material_override
-	part.position = pos
-	part.rotation.x = tilt
-	_held.add_child(part)
+			if info.has("place"):  # A bench is a bit big for one hand; show a small block of it.
+				item.mesh = _mesh(func(st: SurfaceTool) -> void: LowPoly.add_box(st, Vector3(0.3, 0.12, 0.2), Vector3(0, 0.08, 0), color))
+			else:
+				item.mesh = _mesh(func(st: SurfaceTool) -> void: LowPoly.add_blob(st, 0.11, Vector3(0, 0.08, 0), color, 7, 0.08))
+	_held.add_child(item)
 
 
 func get_save_data() -> Dictionary:
@@ -212,24 +393,3 @@ func apply_save_data(data: Dictionary) -> void:
 	_camera_pitch.rotation.x = data.get("camera_pitch", -0.35)
 	_camera_yaw.global_position = global_position + Vector3(0, 1.6, 0)
 	velocity = Vector3.ZERO
-
-
-## Rebuilds the character, coloured by worn equipment.
-## colors maps an equipment slot ("head", "chest", ...) to the worn item's colour.
-func set_look(colors: Dictionary) -> void:
-	var skin := Color(0.95, 0.78, 0.62)
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	LowPoly.add_cylinder(st, 0.3, 0.4, 0.9, 6, Vector3(0, 0.55, 0), colors.get("legs", Color(0.25, 0.32, 0.55)))   # legs
-	LowPoly.add_cylinder(st, 0.35, 0.42, 0.7, 6, Vector3(0, 1.2, 0), colors.get("chest", Color(0.75, 0.25, 0.20))) # tunic
-	LowPoly.add_blob(st, 0.28, Vector3(0, 1.8, 0), skin, 5)                                                        # head
-	LowPoly.add_cylinder(st, 0.08, 0.08, 0.25, 4, Vector3(0, 1.78, -0.3), skin)                                    # nose, shows facing
-	if colors.has("head"):  # helmet
-		LowPoly.add_cylinder(st, 0.2, 0.34, 0.3, 6, Vector3(0, 2.02, 0), colors["head"])
-	else:  # the usual pointy hat
-		LowPoly.add_cylinder(st, 0.0, 0.32, 0.45, 6, Vector3(0, 2.15, 0), Color(0.30, 0.55, 0.30))
-	if colors.has("feet"):  # boots
-		LowPoly.add_cylinder(st, 0.42, 0.44, 0.3, 6, Vector3(0, 0.2, 0), colors["feet"])
-	if colors.has("neck"):  # amulet on the chest
-		LowPoly.add_blob(st, 0.09, Vector3(0, 1.38, -0.4), colors["neck"], 3)
-	_model.mesh = st.commit()

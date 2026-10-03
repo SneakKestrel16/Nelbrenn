@@ -10,6 +10,8 @@ const CHUNK_RES := 24             ## Quads per chunk side (2 m per quad).
 const MAX_VIEW_RADIUS := 8        ## Largest view distance the settings allow.
 const CHUNKS_PER_FRAME := 1       ## Build budget, keeps the frame rate smooth.
 const WATER_LEVEL := 0.0
+const LOD_DISTANCE := 110.0       ## Beyond this (from a chunk's centre), trees and rocks use simpler models.
+const PROPS_CENTER := Vector3(CHUNK_SIZE * 0.5, 0, CHUNK_SIZE * 0.5)
 
 const COLOR_SAND := Color(0.86, 0.79, 0.55)
 const COLOR_WET_SAND := Color(0.72, 0.65, 0.45)
@@ -351,12 +353,14 @@ func _build_props(chunk: Node3D, body: StaticBody3D, coord: Vector2i) -> void:
 		var list: Array = by_kind[kind]
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.use_colors = true
 		mm.mesh = _prop_meshes[kind]
 		mm.instance_count = list.size()
 		for i in list.size():
 			var node: Dictionary = list[i]
 			node["mm"] = mm
 			node["index"] = i
+			mm.set_instance_color(i, _tint(node))
 			if _harvested.has(node["id"]):  # Still regrowing since it was harvested.
 				node["alive"] = false
 				if node["collider"]:
@@ -365,11 +369,40 @@ func _build_props(chunk: Node3D, body: StaticBody3D, coord: Vector2i) -> void:
 		var mmi := MultiMeshInstance3D.new()
 		mmi.multimesh = mm
 		mmi.material_override = _terrain_material
+		mmi.position = PROPS_CENTER  # Centred, so the far-away switch happens evenly.
 		chunk.add_child(mmi)
+		# Far away, swap to a simpler version of the same thing.
+		if _prop_meshes.has(kind + "_far"):
+			var far: MultiMesh = mm.duplicate()
+			far.mesh = _prop_meshes[kind + "_far"]
+			for node in list:
+				node["mm_far"] = far
+			var far_mmi := MultiMeshInstance3D.new()
+			far_mmi.multimesh = far
+			far_mmi.material_override = _terrain_material
+			far_mmi.position = PROPS_CENTER
+			far_mmi.visibility_range_begin = LOD_DISTANCE
+			mmi.visibility_range_end = LOD_DISTANCE
+			chunk.add_child(far_mmi)
 
 	_resources[coord] = nodes
 	for node in nodes:
 		_resource_by_id[node["id"]] = node
+
+
+## A slight colour change per tree, rock or bush so no two look quite the
+## same: plants shift between yellower and bluer greens, stone gets lighter
+## or darker. Always the same for the same thing.
+func _tint(node: Dictionary) -> Color:
+	var h := absi(hash(node["id"]))
+	var a := float(h % 1000) / 1000.0
+	var b := float((h >> 10) % 1000) / 1000.0
+	match node["kind"]:
+		"oak", "pine", "berry_bush":
+			return Color(0.86 + 0.14 * a, 0.88 + 0.12 * b, 0.84 + 0.16 * (1.0 - a))
+		_:
+			var grey := 0.86 + 0.14 * a
+			return Color(grey, grey * (0.97 + 0.03 * b), grey * (0.95 + 0.05 * b))
 
 
 ## Ore deposits (more of them up in the hills and mountains, and in clusters)
@@ -657,7 +690,10 @@ func _animate(node: Dictionary, how: String, from: Vector3) -> void:
 
 
 func _set_instance(node: Dictionary, xform: Transform3D) -> void:
+	xform.origin -= PROPS_CENTER
 	node["mm"].set_instance_transform(node["index"], xform)
+	if node.has("mm_far"):
+		node["mm_far"].set_instance_transform(node["index"], xform)
 
 
 ## Harvested things are squashed to nothing rather than removed, so the
@@ -666,30 +702,61 @@ func _hidden(node: Dictionary) -> Transform3D:
 	return Transform3D(Basis.from_scale(Vector3.ZERO), node["xform"].origin)
 
 
+## Roots spreading out from the bottom of a trunk.
+func _add_roots(st: SurfaceTool, count: int, reach: float, color: Color) -> void:
+	for i in count:
+		var angle := TAU * (i + 0.3) / count
+		var out := Vector3(cos(angle), 0, sin(angle))
+		LowPoly.add_limb(st, out * 0.1 + Vector3(0, 0.45, 0), out * reach + Vector3(0, -0.1, 0), 0.13, 0.04, 4, color, 0.08)
+
+
 func _build_prop_meshes() -> void:
 	var bark := Color(0.40, 0.27, 0.17)
 
+	var stone := Color(0.55, 0.53, 0.50)
+
+	# Pine: a straight trunk with root flares under five layers of branches,
+	# darker at the bottom and lighter towards the tip.
 	var pine := SurfaceTool.new()
 	pine.begin(Mesh.PRIMITIVE_TRIANGLES)
-	LowPoly.add_cylinder(pine, 0.25, 0.35, 2.0, 6, Vector3(0, 1.0, 0), bark)
-	LowPoly.add_cylinder(pine, 0.0, 2.0, 3.0, 7, Vector3(0, 3.2, 0), Color(0.18, 0.42, 0.25))
-	LowPoly.add_cylinder(pine, 0.0, 1.5, 2.6, 7, Vector3(0, 4.8, 0), Color(0.20, 0.46, 0.27))
-	LowPoly.add_cylinder(pine, 0.0, 1.0, 2.0, 7, Vector3(0, 6.2, 0), Color(0.22, 0.50, 0.29))
+	LowPoly.add_limb(pine, Vector3(0, -0.2, 0), Vector3(0, 2.6, 0), 0.32, 0.18, 7, bark, 0.08)
+	_add_roots(pine, 3, 0.45, bark)
+	var tiers := [[2.1, 2.4, 2.9], [1.75, 2.2, 4.0], [1.4, 2.0, 5.0], [1.05, 1.7, 5.9], [0.65, 1.4, 6.8]]
+	for i in tiers.size():
+		var tier: Array = tiers[i]
+		var green := Color(0.14, 0.36, 0.22).lerp(Color(0.25, 0.53, 0.31), float(i) / (tiers.size() - 1))
+		LowPoly.add_cylinder(pine, 0.0, tier[0], tier[1], 9, Vector3(0, tier[2], 0), green, 0.09)
+		# A darker lip under each layer makes the branches look like they droop.
+		LowPoly.add_cylinder(pine, tier[0] * 0.75, tier[0] * 0.95, 0.22, 9, Vector3(0, tier[2] - tier[1] * 0.5 + 0.08, 0), green.darkened(0.25), 0.06)
 	_prop_meshes["pine"] = pine.commit()
 
+	# Oak: a thick trunk that splits into branches, under a crown of leafy clumps.
 	var oak := SurfaceTool.new()
 	oak.begin(Mesh.PRIMITIVE_TRIANGLES)
-	LowPoly.add_cylinder(oak, 0.3, 0.4, 2.8, 6, Vector3(0, 1.4, 0), bark)
-	LowPoly.add_blob(oak, 2.2, Vector3(0, 4.2, 0), Color(0.36, 0.62, 0.24), 11)
-	LowPoly.add_blob(oak, 1.5, Vector3(1.0, 3.6, 0.6), Color(0.32, 0.58, 0.22), 12)
+	LowPoly.add_limb(oak, Vector3(0, -0.2, 0), Vector3(0, 2.5, 0), 0.4, 0.27, 7, bark, 0.08)
+	_add_roots(oak, 4, 0.55, bark)
+	for branch in [[1.8, Vector3(1.1, 3.2, 0.4)], [2.1, Vector3(-1.0, 3.4, -0.4)], [2.3, Vector3(0.2, 3.6, -0.9)]]:
+		LowPoly.add_limb(oak, Vector3(0, branch[0], 0), branch[1], 0.15, 0.07, 5, bark, 0.08)
+	var leaves := [
+		[Vector3(0, 4.2, 0), 2.0, Color(0.36, 0.62, 0.24)],
+		[Vector3(1.25, 3.6, 0.5), 1.35, Color(0.31, 0.57, 0.22)],
+		[Vector3(-1.15, 3.8, -0.45), 1.3, Color(0.34, 0.60, 0.23)],
+		[Vector3(0.3, 3.5, -1.15), 1.1, Color(0.29, 0.54, 0.21)],
+		[Vector3(-0.25, 5.1, 0.35), 1.25, Color(0.41, 0.67, 0.27)],
+	]
+	for i in leaves.size():
+		LowPoly.add_blob(oak, leaves[i][1], leaves[i][0], leaves[i][2], 11 + i, 0.08, 0.85, 1)
 	_prop_meshes["oak"] = oak.commit()
 
+	# Rock: a big boulder with a smaller one and a pebble leaning on it.
 	var rock := SurfaceTool.new()
 	rock.begin(Mesh.PRIMITIVE_TRIANGLES)
-	LowPoly.add_blob(rock, 1.0, Vector3(0, 0.3, 0), Color(0.55, 0.53, 0.50), 21)
+	LowPoly.add_blob(rock, 1.0, Vector3(0, 0.3, 0), stone, 21, 0.08, 0.8, 1)
+	LowPoly.add_blob(rock, 0.5, Vector3(0.8, 0.05, 0.35), stone.darkened(0.08), 22, 0.08, 0.8)
+	LowPoly.add_blob(rock, 0.25, Vector3(-0.85, -0.05, -0.5), stone.lightened(0.05), 23, 0.08)
 	_prop_meshes["rock"] = rock.commit()
 
-	# Ore deposits: a dark boulder studded with lumps of the ore's colour.
+	# Ore deposits: a dark boulder studded with chunks of the ore's colour.
 	var ore_colors := {
 		"coal": Color(0.10, 0.10, 0.11), "copper": Color(0.85, 0.50, 0.25),
 		"iron": Color(0.78, 0.52, 0.42), "gold": Color(1.0, 0.82, 0.25),
@@ -698,34 +765,76 @@ func _build_prop_meshes() -> void:
 		var ore := SurfaceTool.new()
 		ore.begin(Mesh.PRIMITIVE_TRIANGLES)
 		var middle := Vector3(0, 0.35, 0)
-		LowPoly.add_blob(ore, 0.9, middle, Color(0.42, 0.40, 0.38), 31)
+		LowPoly.add_blob(ore, 0.9, middle, Color(0.42, 0.40, 0.38), 31, 0.08, 0.85, 1)
+		LowPoly.add_blob(ore, 0.45, Vector3(-0.75, 0.05, 0.4), Color(0.38, 0.36, 0.34), 32, 0.08, 0.8)
 		var rng := RandomNumberGenerator.new()
 		rng.seed = 77
-		for j in 7:
-			var dir := Vector3(rng.randf_range(-1.0, 1.0), rng.randf_range(0.1, 1.0), rng.randf_range(-1.0, 1.0)).normalized()
-			LowPoly.add_blob(ore, rng.randf_range(0.18, 0.28), middle + dir * 0.82, ore_colors[kind], 40 + j)
+		for j in 9:
+			var dir := Vector3(rng.randf_range(-1.0, 1.0), rng.randf_range(0.05, 1.0), rng.randf_range(-1.0, 1.0)).normalized()
+			var chunk_color: Color = ore_colors[kind].lightened(rng.randf_range(-0.1, 0.2))
+			LowPoly.add_blob(ore, rng.randf_range(0.14, 0.26), middle + dir * Vector3(0.8, 0.7, 0.8), chunk_color, 40 + j, 0.15)
 		_prop_meshes[kind] = ore.commit()
 
-	# Crystals: pale spikes growing out of a small rock.
+	# Crystals: six-sided spikes leaning out of a small rock.
 	var crystal := SurfaceTool.new()
 	crystal.begin(Mesh.PRIMITIVE_TRIANGLES)
-	LowPoly.add_blob(crystal, 0.6, Vector3(0, 0.1, 0), Color(0.42, 0.40, 0.38), 33)
-	for spike in [[0.0, 0.0, 0.22, 1.6], [0.35, 0.15, 0.16, 1.1], [-0.3, 0.2, 0.15, 0.9], [0.1, -0.35, 0.14, 1.0]]:
-		var tint := Color(0.55, 0.85, 0.95).lerp(Color(0.75, 0.6, 0.95), absf(spike[0]) * 2.0)
-		LowPoly.add_cylinder(crystal, 0.0, spike[2], spike[3], 5, Vector3(spike[0], 0.3 + spike[3] * 0.5, spike[1]), tint)
+	LowPoly.add_blob(crystal, 0.65, Vector3(0, 0.1, 0), Color(0.42, 0.40, 0.38), 33, 0.08, 0.7)
+	for spike in [[Vector3(0, 1, 0), 1.7, 0.22], [Vector3(0.5, 0.8, 0.2), 1.2, 0.17], [Vector3(-0.45, 0.85, 0.3), 1.0, 0.15],
+			[Vector3(0.15, 0.75, -0.6), 1.05, 0.15], [Vector3(-0.3, 0.9, -0.35), 0.7, 0.11]]:
+		var dir: Vector3 = spike[0].normalized()
+		var base := Vector3(dir.x * 0.25, 0.3, dir.z * 0.25)
+		var tint := Color(0.55, 0.85, 0.95).lerp(Color(0.75, 0.6, 0.95), absf(dir.x))
+		var tip: Vector3 = base + dir * spike[1]
+		LowPoly.add_limb(crystal, base, base + dir * spike[1] * 0.75, spike[2], spike[2] * 0.9, 6, tint, 0.12)
+		LowPoly.add_limb(crystal, base + dir * spike[1] * 0.75, tip, spike[2] * 0.9, 0.0, 6, tint.lightened(0.15), 0.12)
 	_prop_meshes["crystal"] = crystal.commit()
 
-	# Berry bush: two green puffs dotted with red berries.
+	# Berry bush: a few leafy puffs dotted with red berries.
 	var bush := SurfaceTool.new()
 	bush.begin(Mesh.PRIMITIVE_TRIANGLES)
-	LowPoly.add_blob(bush, 0.75, Vector3(0, 0.55, 0), Color(0.24, 0.50, 0.22), 51)
-	LowPoly.add_blob(bush, 0.55, Vector3(0.5, 0.45, 0.3), Color(0.28, 0.55, 0.24), 52)
+	var puffs := [
+		[Vector3(0, 0.55, 0), 0.72, Color(0.24, 0.50, 0.22)],
+		[Vector3(0.5, 0.42, 0.3), 0.52, Color(0.28, 0.55, 0.24)],
+		[Vector3(-0.45, 0.4, 0.2), 0.48, Color(0.22, 0.47, 0.21)],
+		[Vector3(0.05, 0.4, -0.5), 0.45, Color(0.26, 0.52, 0.23)],
+	]
+	for i in puffs.size():
+		LowPoly.add_blob(bush, puffs[i][1], puffs[i][0], puffs[i][2], 51 + i, 0.1, 0.85, 1)
 	var berry_rng := RandomNumberGenerator.new()
 	berry_rng.seed = 53
-	for j in 9:
-		var dir := Vector3(berry_rng.randf_range(-1.0, 1.0), berry_rng.randf_range(0.0, 1.0), berry_rng.randf_range(-1.0, 1.0)).normalized()
-		LowPoly.add_blob(bush, 0.1, Vector3(0, 0.55, 0) + dir * 0.75, Color(0.80, 0.12, 0.22), 60 + j)
+	for j in 14:
+		var puff: Array = puffs[j % puffs.size()]
+		var dir := Vector3(berry_rng.randf_range(-1.0, 1.0), berry_rng.randf_range(-0.1, 1.0), berry_rng.randf_range(-1.0, 1.0)).normalized()
+		var berry := Color(0.80, 0.12, 0.22).lightened(berry_rng.randf_range(-0.1, 0.15))
+		LowPoly.add_blob(bush, 0.09, puff[0] + dir * puff[1] * 0.92, berry, 60 + j)
 	_prop_meshes["berry_bush"] = bush.commit()
+
+	# Simple versions for far away (see LOD_DISTANCE), about a third of the triangles.
+	var pine_far := SurfaceTool.new()
+	pine_far.begin(Mesh.PRIMITIVE_TRIANGLES)
+	LowPoly.add_cylinder(pine_far, 0.2, 0.32, 2.6, 5, Vector3(0, 1.1, 0), bark)
+	for i in tiers.size():
+		var tier: Array = tiers[i]
+		var green := Color(0.14, 0.36, 0.22).lerp(Color(0.25, 0.53, 0.31), float(i) / (tiers.size() - 1))
+		LowPoly.add_cylinder(pine_far, 0.0, tier[0], tier[1], 7, Vector3(0, tier[2], 0), green)
+	_prop_meshes["pine_far"] = pine_far.commit()
+
+	var oak_far := SurfaceTool.new()
+	oak_far.begin(Mesh.PRIMITIVE_TRIANGLES)
+	LowPoly.add_cylinder(oak_far, 0.27, 0.4, 2.8, 5, Vector3(0, 1.2, 0), bark)
+	LowPoly.add_blob(oak_far, 2.3, Vector3(0, 4.2, 0), Color(0.36, 0.62, 0.24), 11, 0.0, 0.85)
+	LowPoly.add_blob(oak_far, 1.4, Vector3(1.1, 3.6, 0.4), Color(0.31, 0.57, 0.22), 12, 0.0, 0.85)
+	_prop_meshes["oak_far"] = oak_far.commit()
+
+	var rock_far := SurfaceTool.new()
+	rock_far.begin(Mesh.PRIMITIVE_TRIANGLES)
+	LowPoly.add_blob(rock_far, 1.05, Vector3(0, 0.3, 0), stone, 21, 0.0, 0.8)
+	_prop_meshes["rock_far"] = rock_far.commit()
+
+	var bush_far := SurfaceTool.new()
+	bush_far.begin(Mesh.PRIMITIVE_TRIANGLES)
+	LowPoly.add_blob(bush_far, 0.8, Vector3(0.05, 0.5, 0), Color(0.25, 0.51, 0.22), 51, 0.0, 0.85)
+	_prop_meshes["berry_bush_far"] = bush_far.commit()
 
 	# Crafting bench: a plank table on four legs, with a hammer and a block of stone on top.
 	var bench := SurfaceTool.new()

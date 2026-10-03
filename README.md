@@ -5,7 +5,9 @@ Tis nelbrenn — a low-poly open world made with [Godot 4.7](https://godotengine
 The world is generated from noise and streams in around you as you explore:
 rolling grassland, forests, beaches, lakes and snowy mountains, with a full
 day/night cycle. The ground is smooth-shaded with soft blends between sand,
-grass, forest floor, rock and snow; trees and rocks keep the low-poly style.
+grass, forest floor, rock and snow; trees, rocks and your animated explorer
+keep the low-poly style (far-away trees switch to simpler models to keep it
+fast).
 
 ## Play it
 
