@@ -1,0 +1,7 @@
+# Godot cache and import data
+.godot/
+*.tmp
+
+# Exported builds
+export/
+builds/

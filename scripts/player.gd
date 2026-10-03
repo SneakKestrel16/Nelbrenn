@@ -1,0 +1,121 @@
+extends CharacterBody3D
+## Third-person explorer. WASD to move, Shift to sprint, Space to jump,
+## mouse to look around. Click the window to capture the mouse, Esc to free it.
+
+const LowPoly := preload("res://scripts/low_poly.gd")
+
+const WALK_SPEED := 7.0
+const SPRINT_SPEED := 14.0
+const SWIM_SPEED := 4.0
+const JUMP_VELOCITY := 8.0
+const GRAVITY := 22.0
+const MOUSE_SENSITIVITY := 0.0025
+const WATER_LEVEL := 0.0
+
+var _camera_yaw: Node3D
+var _camera_pitch: Node3D
+var _camera: Camera3D
+var _model: Node3D
+
+
+func _ready() -> void:
+	var capsule := CapsuleShape3D.new()
+	capsule.radius = 0.4
+	capsule.height = 1.8
+	var collision := CollisionShape3D.new()
+	collision.shape = capsule
+	collision.position.y = 0.9
+	add_child(collision)
+
+	_model = _build_model()
+	add_child(_model)
+
+	_camera_yaw = Node3D.new()
+	_camera_yaw.position.y = 1.6
+	add_child(_camera_yaw)
+	_camera_yaw.top_level = true
+
+	_camera_pitch = Node3D.new()
+	_camera_pitch.rotation.x = -0.35
+	_camera_yaw.add_child(_camera_pitch)
+
+	var arm := SpringArm3D.new()
+	arm.spring_length = 6.0
+	arm.margin = 0.3
+	arm.add_excluded_object(get_rid())
+	_camera_pitch.add_child(arm)
+
+	_camera = Camera3D.new()
+	_camera.far = 600.0
+	_camera.fov = 70.0
+	arm.add_child(_camera)
+	_camera.current = true
+
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	elif event.is_action_pressed("release_mouse"):
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	elif event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		_camera_yaw.rotation.y -= event.relative.x * MOUSE_SENSITIVITY
+		_camera_pitch.rotation.x = clampf(_camera_pitch.rotation.x - event.relative.y * MOUSE_SENSITIVITY, -1.3, 0.6)
+
+
+func _physics_process(delta: float) -> void:
+	var swimming := global_position.y + 1.0 < WATER_LEVEL
+
+	var input := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
+	var direction := (_camera_yaw.global_basis * Vector3(input.x, 0, input.y))
+	direction.y = 0
+	direction = direction.normalized()
+
+	var speed := WALK_SPEED
+	if swimming:
+		speed = SWIM_SPEED
+	elif Input.is_action_pressed("sprint"):
+		speed = SPRINT_SPEED
+
+	if swimming:
+		# Float gently back up to the surface.
+		velocity.y = move_toward(velocity.y, 2.5, 12.0 * delta)
+	elif not is_on_floor():
+		velocity.y -= GRAVITY * delta
+
+	if Input.is_action_just_pressed("jump") and (is_on_floor() or swimming):
+		velocity.y = JUMP_VELOCITY
+
+	var accel := 12.0 if is_on_floor() or swimming else 3.0
+	velocity.x = move_toward(velocity.x, direction.x * speed, speed * accel * delta)
+	velocity.z = move_toward(velocity.z, direction.z * speed, speed * accel * delta)
+
+	move_and_slide()
+
+	if direction.length() > 0.1:
+		var target_yaw := atan2(-direction.x, -direction.z)
+		_model.rotation.y = lerp_angle(_model.rotation.y, target_yaw, 10.0 * delta)
+
+	_camera_yaw.global_position = global_position + Vector3(0, 1.6, 0)
+
+	# Safety net if the player ever falls out of the world.
+	if global_position.y < -100.0:
+		var world = get_parent().get_node_or_null("World")
+		if world:
+			global_position = world.find_spawn_point()
+			velocity = Vector3.ZERO
+
+
+func _build_model() -> MeshInstance3D:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	LowPoly.add_cylinder(st, 0.3, 0.4, 0.9, 6, Vector3(0, 0.55, 0), Color(0.25, 0.32, 0.55))   # legs
+	LowPoly.add_cylinder(st, 0.35, 0.42, 0.7, 6, Vector3(0, 1.2, 0), Color(0.75, 0.25, 0.20))  # tunic
+	LowPoly.add_blob(st, 0.28, Vector3(0, 1.8, 0), Color(0.95, 0.78, 0.62), 5)                # head
+	LowPoly.add_cylinder(st, 0.0, 0.32, 0.45, 6, Vector3(0, 2.15, 0), Color(0.30, 0.55, 0.30)) # hat
+	LowPoly.add_cylinder(st, 0.08, 0.08, 0.25, 4, Vector3(0, 1.78, -0.3), Color(0.95, 0.78, 0.62)) # nose, shows facing
+	var mesh_instance := MeshInstance3D.new()
+	mesh_instance.mesh = st.commit()
+	mesh_instance.material_override = LowPoly.make_material()
+	return mesh_instance
