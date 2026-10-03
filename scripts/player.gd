@@ -107,6 +107,26 @@ func _physics_process(delta: float) -> void:
 			velocity = Vector3.ZERO
 
 
+func get_save_data() -> Dictionary:
+	return {
+		"position": [global_position.x, global_position.y, global_position.z],
+		"facing": _model.rotation.y,
+		"camera_yaw": _camera_yaw.rotation.y,
+		"camera_pitch": _camera_pitch.rotation.x,
+	}
+
+
+func apply_save_data(data: Dictionary) -> void:
+	var p: Array = data.get("position", [])
+	if p.size() == 3:
+		global_position = Vector3(p[0], p[1], p[2])
+	_model.rotation.y = data.get("facing", 0.0)
+	_camera_yaw.rotation.y = data.get("camera_yaw", 0.0)
+	_camera_pitch.rotation.x = data.get("camera_pitch", -0.35)
+	_camera_yaw.global_position = global_position + Vector3(0, 1.6, 0)
+	velocity = Vector3.ZERO
+
+
 func _build_model() -> MeshInstance3D:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
