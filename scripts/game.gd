@@ -1,6 +1,6 @@
 extends Node3D
-## Entry point: sets up controls, sky, sun, the world and the player,
-## and handles saving and loading.
+## The game itself: sets up the sky, sun, world, player, inventory and menus
+## for the world picked in the main menu, and handles saving it.
 
 const WorldScript := preload("res://scripts/world.gd")
 const PlayerScript := preload("res://scripts/player.gd")
@@ -8,43 +8,57 @@ const DayNightScript := preload("res://scripts/day_night.gd")
 const SaveGame := preload("res://scripts/save_game.gd")
 const InventoryScript := preload("res://scripts/inventory.gd")
 const InventoryUIScript := preload("res://scripts/inventory_ui.gd")
+const PauseMenuScript := preload("res://scripts/pause_menu.gd")
+const AmbienceScript := preload("res://scripts/ambience.gd")
 
-## Seed for a brand-new world. A saved game keeps the seed it was started with.
-@export var world_seed: int = 1337
 @export var autosave_seconds := 30.0
+
+var world_id := ""
+var world_name := ""
+var world_seed := 0
 
 var world  # world.gd
 var player  # player.gd
 var day_night  # day_night.gd
 var inventory  # inventory.gd
 var inventory_ui  # inventory_ui.gd
+var pause_menu  # pause_menu.gd
 
+var _sun: DirectionalLight3D
+var _save_info := {}  # The world's name and dates, kept when saving.
 var _toast: Label
 var _toast_tween: Tween
-var _restart_armed_until := 0.0
 
 
 func _ready() -> void:
-	_setup_input()
 	_build_toast()
 
-	var save := SaveGame.read()
-	if save.has("world_seed"):
-		world_seed = int(save["world_seed"])
+	world_id = SaveGame.current_world_id
+	if not SaveGame.exists(world_id):
+		# Started straight from the editor (F6) without the main menu:
+		# use the last played world, or make one.
+		var worlds := SaveGame.list_worlds()
+		world_id = worlds[0]["id"] if not worlds.is_empty() else SaveGame.create_world("Test World", SaveGame.seed_from_text(""))
+		SaveGame.current_world_id = world_id
+	var save := SaveGame.read(world_id)
+	world_seed = int(save.get("world_seed", 1337))
+	world_name = String(save.get("name", "World"))
+	for key in ["name", "world_seed", "created_at"]:
+		if save.has(key):
+			_save_info[key] = save[key]
 
 	var env := WorldEnvironment.new()
 	env.name = "WorldEnvironment"
 	add_child(env)
 
-	var sun := DirectionalLight3D.new()
-	sun.name = "Sun"
-	sun.shadow_enabled = true
-	sun.directional_shadow_max_distance = 150.0
-	add_child(sun)
+	_sun = DirectionalLight3D.new()
+	_sun.name = "Sun"
+	_sun.directional_shadow_max_distance = 150.0
+	add_child(_sun)
 
 	day_night = DayNightScript.new()
 	day_night.name = "DayNight"
-	day_night.sun = sun
+	day_night.sun = _sun
 	day_night.world_environment = env
 	if save.has("time_of_day"):
 		day_night.time_of_day = float(save["time_of_day"])
@@ -53,16 +67,21 @@ func _ready() -> void:
 	world = WorldScript.new()
 	world.name = "World"
 	world.world_seed = world_seed
+	world.view_radius = Settings.get_value("graphics", "view_distance")
 	add_child(world)
 
 	player = PlayerScript.new()
 	player.name = "Player"
 	add_child(player)
-	if save.has("player"):
-		player.apply_save_data(save["player"])
-		show_message("Welcome back!")
-	else:
+	var is_new := not save.has("player")
+	if is_new:
 		player.global_position = world.find_spawn_point()
+	else:
+		player.apply_save_data(save["player"])
+		# The terrain may have changed since this was saved; never start inside the ground.
+		var ground: float = world.get_height(player.global_position.x, player.global_position.z)
+		if player.global_position.y < ground + 0.5:
+			player.global_position.y = ground + 1.0
 
 	inventory = InventoryScript.new()
 	inventory.name = "Inventory"
@@ -79,8 +98,21 @@ func _ready() -> void:
 	inventory_ui.player = player
 	add_child(inventory_ui)
 
+	var ambience := AmbienceScript.new()
+	ambience.name = "Ambience"
+	ambience.listener = player
+	add_child(ambience)
+
+	pause_menu = PauseMenuScript.new()
+	pause_menu.name = "PauseMenu"
+	pause_menu.game = self
+	add_child(pause_menu)
+
 	world.target = player
 	world.generate_around(player.global_position, true)
+
+	Settings.changed.connect(_apply_settings)
+	_apply_settings()
 
 	var timer := Timer.new()
 	timer.wait_time = autosave_seconds
@@ -88,12 +120,17 @@ func _ready() -> void:
 	timer.timeout.connect(save_game.bind(false))
 	add_child(timer)
 
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	if is_new:
+		save_game(false)
+		show_message("Welcome to %s!" % world_name)
+	else:
+		show_message("Welcome back to %s!" % world_name)
+
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("save_game"):
 		save_game(true)
-	elif event.is_action_pressed("restart_game"):
-		_request_restart()
 
 
 func _notification(what: int) -> void:
@@ -103,28 +140,24 @@ func _notification(what: int) -> void:
 
 
 func save_game(announce: bool) -> void:
-	var data := {
+	var data := _save_info.duplicate()
+	data.merge({
 		"world_seed": world_seed,
 		"time_of_day": day_night.time_of_day,
 		"player": player.get_save_data(),
 		"inventory": inventory.get_save_data(),
 		"saved_at": Time.get_datetime_string_from_system(),
-	}
-	var ok: bool = SaveGame.write(data)
+	}, true)
+	var ok: bool = SaveGame.write(world_id, data)
 	if announce or not ok:
 		show_message("Game saved" if ok else "Could not save the game!")
 
 
-## Press twice within 3 seconds to wipe the save and start over.
-func _request_restart() -> void:
-	var now := Time.get_ticks_msec() / 1000.0
-	if now > _restart_armed_until:
-		_restart_armed_until = now + 3.0
-		show_message("Press F9 again to start over (your save will be erased)")
-		return
-	# Reloading with no save starts fresh, using the world_seed set on this scene.
-	SaveGame.delete()
-	get_tree().reload_current_scene()
+## Settings the game reads itself (the rest are handled by the Settings autoload).
+func _apply_settings() -> void:
+	player.set_fov(Settings.get_value("graphics", "fov"))
+	world.view_radius = Settings.get_value("graphics", "view_distance")
+	_sun.shadow_enabled = Settings.get_value("graphics", "shadows") > 0
 
 
 ## Worn equipment changes how the player looks, runs and jumps.
@@ -146,12 +179,14 @@ func show_message(text: String) -> void:
 	if _toast_tween:
 		_toast_tween.kill()
 	_toast_tween = create_tween()
+	_toast_tween.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)  # Also fades while paused.
 	_toast_tween.tween_interval(2.0)
 	_toast_tween.tween_property(_toast, "modulate:a", 0.0, 0.8)
 
 
 func _build_toast() -> void:
 	var layer := CanvasLayer.new()
+	layer.layer = 20
 	add_child(layer)
 	_toast = Label.new()
 	_toast.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
@@ -163,26 +198,3 @@ func _build_toast() -> void:
 	_toast.add_theme_constant_override("outline_size", 6)
 	_toast.modulate.a = 0.0
 	layer.add_child(_toast)
-
-
-func _setup_input() -> void:
-	_add_keys("move_forward", [KEY_W, KEY_UP])
-	_add_keys("move_back", [KEY_S, KEY_DOWN])
-	_add_keys("move_left", [KEY_A, KEY_LEFT])
-	_add_keys("move_right", [KEY_D, KEY_RIGHT])
-	_add_keys("jump", [KEY_SPACE])
-	_add_keys("sprint", [KEY_SHIFT])
-	_add_keys("release_mouse", [KEY_ESCAPE])
-	_add_keys("save_game", [KEY_F5])
-	_add_keys("restart_game", [KEY_F9])
-	_add_keys("inventory", [KEY_I, KEY_TAB])
-
-
-func _add_keys(action: StringName, keys: Array) -> void:
-	if InputMap.has_action(action):
-		return
-	InputMap.add_action(action)
-	for key in keys:
-		var ev := InputEventKey.new()
-		ev.physical_keycode = key
-		InputMap.action_add_event(action, ev)

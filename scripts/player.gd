@@ -1,6 +1,6 @@
 extends CharacterBody3D
 ## Third-person explorer. WASD to move, Shift to sprint, Space to jump,
-## mouse to look around. Click the window to capture the mouse, Esc to free it.
+## mouse to look around. Keys and mouse settings come from the Settings autoload.
 
 const LowPoly := preload("res://scripts/low_poly.gd")
 
@@ -67,11 +67,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton and event.pressed:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-	elif event.is_action_pressed("release_mouse"):
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	elif event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		_camera_yaw.rotation.y -= event.relative.x * MOUSE_SENSITIVITY
-		_camera_pitch.rotation.x = clampf(_camera_pitch.rotation.x - event.relative.y * MOUSE_SENSITIVITY, -1.3, 0.6)
+		var sensitivity: float = MOUSE_SENSITIVITY * Settings.get_value("controls", "mouse_sensitivity")
+		var invert := -1.0 if Settings.get_value("controls", "invert_y") else 1.0
+		_camera_yaw.rotation.y -= event.relative.x * sensitivity
+		_camera_pitch.rotation.x = clampf(_camera_pitch.rotation.x - event.relative.y * sensitivity * invert, -1.3, 0.6)
 
 
 func _physics_process(delta: float) -> void:
@@ -118,6 +118,10 @@ func _physics_process(delta: float) -> void:
 		if world:
 			global_position = world.find_spawn_point()
 			velocity = Vector3.ZERO
+
+
+func set_fov(degrees: float) -> void:
+	_camera.fov = degrees
 
 
 func get_save_data() -> Dictionary:

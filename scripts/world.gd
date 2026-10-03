@@ -5,31 +5,44 @@ extends Node3D
 const LowPoly := preload("res://scripts/low_poly.gd")
 
 const CHUNK_SIZE := 48.0          ## Width of one chunk in metres.
-const CHUNK_RES := 16             ## Quads per chunk side (3 m per quad).
-const VIEW_RADIUS := 5            ## Chunks kept loaded in each direction.
-const CHUNKS_PER_FRAME := 2       ## Build budget, keeps the frame rate smooth.
+const CHUNK_RES := 24             ## Quads per chunk side (2 m per quad).
+const MAX_VIEW_RADIUS := 8        ## Largest view distance the settings allow.
+const CHUNKS_PER_FRAME := 1       ## Build budget, keeps the frame rate smooth.
 const WATER_LEVEL := 0.0
 
 const COLOR_SAND := Color(0.86, 0.79, 0.55)
-const COLOR_GRASS := Color(0.42, 0.68, 0.30)
-const COLOR_GRASS_DARK := Color(0.30, 0.55, 0.24)
-const COLOR_ROCK := Color(0.50, 0.47, 0.44)
+const COLOR_WET_SAND := Color(0.72, 0.65, 0.45)
+const COLOR_GRASS := Color(0.42, 0.66, 0.29)
+const COLOR_GRASS_DRY := Color(0.58, 0.66, 0.33)
+const COLOR_GRASS_DARK := Color(0.27, 0.48, 0.22)  ## Forest floor.
+const COLOR_DIRT := Color(0.47, 0.39, 0.27)
+const COLOR_ROCK := Color(0.52, 0.49, 0.46)
+const COLOR_ROCK_DARK := Color(0.40, 0.38, 0.36)
 const COLOR_SNOW := Color(0.95, 0.96, 0.98)
 const COLOR_SEABED := Color(0.55, 0.52, 0.40)
 
 var world_seed: int = 1337
 var target: Node3D
+## Chunks kept loaded in each direction (the view distance setting).
+var view_radius := 5:
+	set(value):
+		view_radius = value
+		_last_center = Vector2i(1 << 30, 1 << 30)  # Re-check which chunks to load.
 
 var _continent := FastNoiseLite.new()
 var _hills := FastNoiseLite.new()
 var _mountains := FastNoiseLite.new()
 var _forest := FastNoiseLite.new()
+var _warp := FastNoiseLite.new()     ## Bends the other noises so shapes look less blobby.
+var _detail := FastNoiseLite.new()   ## Small bumps and colour speckle.
+var _patches := FastNoiseLite.new()  ## Large soft patches of drier or greener ground.
 
 var _chunks := {}                 ## Vector2i -> Node3D
 var _queue: Array[Vector2i] = []
 var _last_center := Vector2i(1 << 30, 1 << 30)
 
-var _terrain_material: StandardMaterial3D
+var _terrain_material: StandardMaterial3D  ## Trees and rocks.
+var _ground_material: StandardMaterial3D
 var _water: MeshInstance3D
 var _prop_meshes := {}            ## name -> ArrayMesh
 
@@ -51,7 +64,20 @@ func _ready() -> void:
 	_forest.seed = world_seed + 3
 	_forest.frequency = 0.01
 
+	_warp.seed = world_seed + 4
+	_warp.frequency = 0.004
+	_warp.fractal_octaves = 2
+
+	_detail.seed = world_seed + 5
+	_detail.frequency = 0.08
+	_detail.fractal_octaves = 2
+
+	_patches.seed = world_seed + 6
+	_patches.frequency = 0.012
+	_patches.fractal_octaves = 2
+
 	_terrain_material = LowPoly.make_material()
+	_ground_material = _make_ground_material()
 	_build_prop_meshes()
 	_build_water()
 
@@ -70,12 +96,20 @@ func _process(_delta: float) -> void:
 
 ## Terrain height in metres at a world position.
 func get_height(x: float, z: float) -> float:
-	var c := _continent.get_noise_2d(x, z)
+	# Sample the big shapes at a slightly bent position, which gives winding
+	# coastlines and valleys instead of round blobs.
+	var wx := x + _warp.get_noise_2d(x, z) * 30.0
+	var wz := z + _warp.get_noise_2d(x + 5200.0, z - 1300.0) * 30.0
+	var c := _continent.get_noise_2d(wx, wz)
 	var base := c * 30.0 + 4.0
-	var hills := _hills.get_noise_2d(x, z) * 6.0
-	var ridge := (_mountains.get_noise_2d(x, z) + 1.0) * 0.5
+	# Hills roll more gently on low ground and near the coast.
+	var hills := _hills.get_noise_2d(wx, wz) * lerpf(3.0, 7.0, smoothstep(-0.1, 0.4, c))
+	var ridge := (_mountains.get_noise_2d(wx, wz) + 1.0) * 0.5
 	var mountains := pow(ridge, 3.0) * 90.0 * smoothstep(0.05, 0.5, c)
-	return base + hills + mountains
+	var h := base + hills + mountains
+	# Flatten the land just around sea level into gentle beaches and shallows.
+	h *= lerpf(0.55, 1.0, smoothstep(0.0, 5.0, absf(h)))
+	return h + _detail.get_noise_2d(x, z) * 0.4
 
 
 ## Queues chunks near `pos` and unloads far ones. With `immediate`, the
@@ -87,13 +121,13 @@ func generate_around(pos: Vector3, immediate: bool) -> void:
 	_last_center = center
 
 	for coord in _chunks.keys():
-		if _chunk_distance(coord, center) > VIEW_RADIUS + 1:
+		if _chunk_distance(coord, center) > view_radius + 1:
 			_chunks[coord].queue_free()
 			_chunks.erase(coord)
 
 	_queue.clear()
-	for x in range(-VIEW_RADIUS, VIEW_RADIUS + 1):
-		for z in range(-VIEW_RADIUS, VIEW_RADIUS + 1):
+	for x in range(-view_radius, view_radius + 1):
+		for z in range(-view_radius, view_radius + 1):
 			var coord := center + Vector2i(x, z)
 			if not _chunks.has(coord):
 				_queue.append(coord)
@@ -144,71 +178,114 @@ func _build_chunk(coord: Vector2i) -> void:
 
 func _build_terrain(chunk: Node3D, body: StaticBody3D) -> void:
 	var step := CHUNK_SIZE / CHUNK_RES
+	var n := CHUNK_RES + 1
+	# Heights with one extra sample on every side, so the smooth normals at a
+	# chunk's edge match its neighbour's and there are no visible seams.
+	var b := n + 2
 	var heights := PackedFloat32Array()
-	heights.resize((CHUNK_RES + 1) * (CHUNK_RES + 1))
-	for z in CHUNK_RES + 1:
-		for x in CHUNK_RES + 1:
-			heights[z * (CHUNK_RES + 1) + x] = get_height(chunk.position.x + x * step, chunk.position.z + z * step)
+	heights.resize(b * b)
+	for z in b:
+		for x in b:
+			heights[z * b + x] = get_height(chunk.position.x + (x - 1) * step, chunk.position.z + (z - 1) * step)
 
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var faces := PackedVector3Array()
+	var vertices := PackedVector3Array()
+	var normals := PackedVector3Array()
+	var colors := PackedColorArray()
+	vertices.resize(n * n)
+	normals.resize(n * n)
+	colors.resize(n * n)
+	for z in n:
+		for x in n:
+			var i := (z + 1) * b + (x + 1)
+			var h := heights[i]
+			var normal := Vector3(heights[i - 1] - heights[i + 1], 2.0 * step, heights[i - b] - heights[i + b]).normalized()
+			var k := z * n + x
+			vertices[k] = Vector3(x * step, h, z * step)
+			normals[k] = normal
+			colors[k] = _terrain_color(h, normal.y, chunk.position.x + x * step, chunk.position.z + z * step)
 
+	var indices := PackedInt32Array()
 	for z in CHUNK_RES:
 		for x in CHUNK_RES:
-			var p00 := Vector3(x * step, heights[z * (CHUNK_RES + 1) + x], z * step)
-			var p10 := Vector3((x + 1) * step, heights[z * (CHUNK_RES + 1) + x + 1], z * step)
-			var p01 := Vector3(x * step, heights[(z + 1) * (CHUNK_RES + 1) + x], (z + 1) * step)
-			var p11 := Vector3((x + 1) * step, heights[(z + 1) * (CHUNK_RES + 1) + x + 1], (z + 1) * step)
-			# Alternate the diagonal so the low-poly facets don't all line up.
-			if (x + z) % 2 == 0:
-				_add_terrain_tri(st, faces, p00, p10, p11, chunk.position)
-				_add_terrain_tri(st, faces, p00, p11, p01, chunk.position)
+			var i00 := z * n + x
+			var i10 := i00 + 1
+			var i01 := i00 + n
+			var i11 := i01 + 1
+			# Split each square along the diagonal that best follows the ground.
+			if absf(vertices[i00].y - vertices[i11].y) < absf(vertices[i10].y - vertices[i01].y):
+				indices.append_array(PackedInt32Array([i00, i10, i11, i00, i11, i01]))
 			else:
-				_add_terrain_tri(st, faces, p00, p10, p01, chunk.position)
-				_add_terrain_tri(st, faces, p10, p11, p01, chunk.position)
+				indices.append_array(PackedInt32Array([i00, i10, i01, i10, i11, i01]))
+
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_COLOR] = colors
+	arrays[Mesh.ARRAY_INDEX] = indices
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 
 	var mesh_instance := MeshInstance3D.new()
-	mesh_instance.mesh = st.commit()
-	mesh_instance.material_override = _terrain_material
+	mesh_instance.mesh = mesh
+	mesh_instance.material_override = _ground_material
 	chunk.add_child(mesh_instance)
 
-	var shape := ConcavePolygonShape3D.new()
-	shape.set_faces(faces)
 	var collision := CollisionShape3D.new()
-	collision.shape = shape
+	collision.shape = mesh.create_trimesh_shape()
 	body.add_child(collision)
 
 
-func _add_terrain_tri(st: SurfaceTool, faces: PackedVector3Array, a: Vector3, b: Vector3, c: Vector3, origin: Vector3) -> void:
-	var normal := LowPoly.face_normal(a, b, c)
-	if normal.y < 0.0:
-		var t := b
-		b = c
-		c = t
-		normal = -normal
-
-	var mid := (a + b + c) / 3.0
-	var color := _terrain_color(mid.y, normal.y, origin.x + mid.x, origin.z + mid.z)
-	st.set_color(color)
-	st.set_normal(normal)
-	for p in [a, b, c]:
-		st.add_vertex(p)
-		faces.append(p)
-
-
+## Ground colour at one point, blending smoothly between sand, grass, forest
+## floor, dirt, rock and snow depending on height and steepness (`up` is 1 on
+## flat ground and smaller on slopes).
 func _terrain_color(h: float, up: float, wx: float, wz: float) -> Color:
-	if h < WATER_LEVEL - 0.5:
-		return COLOR_SEABED
-	if h < WATER_LEVEL + 1.8:
-		return COLOR_SAND
-	if h > 58.0 and up > 0.6:
-		return COLOR_SNOW
-	if up < 0.72 or h > 42.0:
-		return COLOR_ROCK
-	var t := clampf(_forest.get_noise_2d(wx * 3.0, wz * 3.0) * 0.5 + 0.5, 0.0, 1.0)
-	return COLOR_GRASS.lerp(COLOR_GRASS_DARK, t)
+	var patch := _patches.get_noise_2d(wx, wz)
+	var speck := _detail.get_noise_2d(wx * 4.0, wz * 4.0)
+	var forest := _forest.get_noise_2d(wx, wz)  # Same noise that places the trees.
 
+	var color := COLOR_GRASS.lerp(COLOR_GRASS_DRY, smoothstep(0.05, 0.6, patch) * 0.8)
+	color = color.lerp(COLOR_GRASS_DRY, smoothstep(22.0, 38.0, h) * 0.6)    # Drier higher up.
+	color = color.lerp(COLOR_GRASS_DARK, smoothstep(-0.05, 0.4, forest))   # Darker under trees.
+	color = color.lerp(COLOR_DIRT, (1.0 - smoothstep(0.78, 0.9, up)) * 0.7)  # Bare earth on slopes.
+
+	var sand := 1.0 - smoothstep(1.2, 2.6, h + speck * 0.5)
+	color = color.lerp(COLOR_SAND.lerp(COLOR_WET_SAND, 1.0 - smoothstep(0.0, 0.8, h)), sand)
+
+	var rock := maxf(1.0 - smoothstep(0.66, 0.8, up), smoothstep(38.0, 48.0, h + patch * 6.0))
+	color = color.lerp(COLOR_ROCK.lerp(COLOR_ROCK_DARK, speck * 0.5 + 0.5), rock)
+
+	var snow := smoothstep(54.0, 60.0, h + patch * 6.0) * smoothstep(0.5, 0.65, up)
+	color = color.lerp(COLOR_SNOW, snow)
+
+	color = color.lerp(COLOR_SEABED, 1.0 - smoothstep(-2.0, -0.3, h))
+	return color * (1.0 + speck * 0.05)
+
+
+## Vertex-coloured ground with a faint speckled texture on top, so large
+## flat areas don't look like plastic.
+func _make_ground_material() -> StandardMaterial3D:
+	var mat := LowPoly.make_material()
+	var noise := FastNoiseLite.new()
+	noise.seed = world_seed
+	noise.frequency = 0.03
+	noise.fractal_octaves = 3
+	var gradient := Gradient.new()
+	gradient.set_color(0, Color(0.84, 0.84, 0.84))
+	gradient.set_color(1, Color(1.0, 1.0, 1.0))
+	var texture := NoiseTexture2D.new()
+	texture.width = 256
+	texture.height = 256
+	texture.seamless = true
+	texture.noise = noise
+	texture.color_ramp = gradient
+	mat.detail_enabled = true
+	mat.detail_blend_mode = BaseMaterial3D.BLEND_MODE_MUL
+	mat.detail_albedo = texture
+	mat.uv1_triplanar = true
+	mat.uv1_world_triplanar = true  # Lines up across chunks.
+	mat.uv1_scale = Vector3.ONE * 0.08
+	return mat
 
 func _build_props(chunk: Node3D, body: StaticBody3D, coord: Vector2i) -> void:
 	var rng := RandomNumberGenerator.new()
@@ -289,7 +366,7 @@ func _build_prop_meshes() -> void:
 
 func _build_water() -> void:
 	var plane := PlaneMesh.new()
-	var size := CHUNK_SIZE * (VIEW_RADIUS * 2 + 3)
+	var size := CHUNK_SIZE * (MAX_VIEW_RADIUS * 2 + 3)
 	plane.size = Vector2(size, size)
 
 	var mat := StandardMaterial3D.new()

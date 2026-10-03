@@ -39,7 +39,7 @@ func _input(event: InputEvent) -> void:
 	if event.is_action_pressed("inventory"):
 		set_open(not visible)
 		get_viewport().set_input_as_handled()
-	elif visible and event.is_action_pressed("release_mouse"):
+	elif visible and event.is_action_pressed("pause"):
 		set_open(false)
 		get_viewport().set_input_as_handled()
 

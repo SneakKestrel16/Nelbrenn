@@ -12,8 +12,12 @@ config_version=5
 
 config/name="Nelbrenn"
 config/description="A low-poly open world."
-run/main_scene="res://scenes/main.tscn"
+run/main_scene="res://scenes/main_menu.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
+
+[autoload]
+
+Settings="*res://scripts/settings.gd"
 
 [display]
 
