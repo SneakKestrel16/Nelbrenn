@@ -1,9 +1,15 @@
 extends CanvasLayer
 ## The inventory screen. Press I or Tab to open and close it (Esc also closes).
-## Drag items between slots, or right-click to equip / unequip.
+## Drag items between slots, or right-click to equip / unequip. The right
+## side crafts simple things by hand (see "hand" in recipes.gd).
 
 const SlotScript := preload("res://scripts/inventory_slot.gd")
 const Items := preload("res://scripts/items.gd")
+const Recipes := preload("res://scripts/recipes.gd")
+const UI := preload("res://scripts/ui.gd")
+
+const HAVE_COLOR := Color(0.55, 0.9, 0.45)
+const MISSING_COLOR := Color(1.0, 0.5, 0.42)
 
 const HINT := "Drag items to move them  •  Right-click to equip, or to move between bag and hotbar  •  I or Tab to close"
 
@@ -13,6 +19,7 @@ var player  # player.gd
 var _slots: Array = []
 var _stats_label: Label
 var _info_label: Label
+var _craft_rows: Array = []  # {"recipe", "button", "needs"}
 
 
 func _ready() -> void:
@@ -49,6 +56,15 @@ func _refresh() -> void:
 		slot.refresh()
 	var stats: Dictionary = inventory.get_stats()
 	_stats_label.text = "Armor  %d\nSpeed  %+d%%\nJump   %+d%%" % [stats["armor"], stats["speed"], stats["jump"]]
+	for row in _craft_rows:
+		var ok := Recipes.can_craft(row["recipe"], inventory)
+		row["button"].disabled = not ok
+		row["needs"].add_theme_color_override("font_color", HAVE_COLOR if ok else MISSING_COLOR)
+
+
+func _hand_craft(recipe: Dictionary) -> void:
+	var problem := Recipes.craft(recipe, inventory)
+	_info_label.text = problem if problem != "" else "Made %s!" % Items.get_info(recipe["id"])["name"]
 
 
 func _on_slot_hovered(ref) -> void:
@@ -64,6 +80,7 @@ func _on_slot_hovered(ref) -> void:
 func _build() -> void:
 	var root := Control.new()
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.theme = UI.make_theme()
 	add_child(root)
 
 	# Dark backdrop; also stops clicks from reaching the game behind.
@@ -132,6 +149,41 @@ func _build() -> void:
 		var slot = _make_slot(inventory.hotbar_ref(i))
 		slot.number = str(i + 1)
 		hotbar_row.add_child(slot)
+
+	row.add_child(VSeparator.new())
+
+	# Right: simple crafting by hand. Everything else needs a crafting bench.
+	var craft_box := VBoxContainer.new()
+	craft_box.add_theme_constant_override("separation", 8)
+	craft_box.custom_minimum_size.x = 250
+	row.add_child(craft_box)
+	craft_box.add_child(_label("Crafting", 20))
+	for recipe in Recipes.hand_recipes():
+		var line := HBoxContainer.new()
+		line.add_theme_constant_override("separation", 8)
+		var icon := Control.new()
+		icon.custom_minimum_size = Vector2(44, 44)
+		icon.draw.connect(func(): SlotScript.draw_icon(icon, recipe["id"], "", Rect2(Vector2.ZERO, icon.size)))
+		icon.tooltip_text = Items.describe(recipe["id"])
+		line.add_child(icon)
+		var text := VBoxContainer.new()
+		text.add_theme_constant_override("separation", 0)
+		text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		text.add_child(_label(Items.get_info(recipe["id"])["name"], 17))
+		var needs := _label(Recipes.needs_text(recipe), 13)
+		needs.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		needs.custom_minimum_size.x = 130
+		text.add_child(needs)
+		line.add_child(text)
+		var button := UI.button("Craft", _hand_craft.bind(recipe), 76)
+		button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		button.add_theme_font_size_override("font_size", 16)
+		line.add_child(button)
+		craft_box.add_child(line)
+		_craft_rows.append({"recipe": recipe, "button": button, "needs": needs})
+	var bench_hint := _label("Build a crafting bench for tools,\nsmelting, armor and more.", 14)
+	bench_hint.modulate = UI.SOFT_TEXT_COLOR
+	craft_box.add_child(bench_hint)
 
 	_info_label = _label("", 17)
 	_info_label.custom_minimum_size.y = 26

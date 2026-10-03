@@ -66,25 +66,17 @@ func _input(event: InputEvent) -> void:
 
 
 func can_craft(recipe: Dictionary) -> bool:
-	for id in recipe["needs"]:
-		if inventory.count_of(id) < recipe["needs"][id]:
-			return false
-	return true
+	return Recipes.can_craft(recipe, inventory)
 
 
 func _craft() -> void:
 	var recipe: Dictionary = Recipes.RECIPES[_selected]
-	if not can_craft(recipe):
-		return
-	var before: Dictionary = inventory.get_save_data()
-	for id in recipe["needs"]:
-		inventory.remove_item(id, recipe["needs"][id])
-	var made: int = recipe.get("count", 1)
-	if inventory.add_item(recipe["id"], made) > 0:
-		inventory.apply_save_data(before)  # Undo: there was no room for it.
-		_status.text = "No room in your bag for that."
+	var problem := Recipes.craft(recipe, inventory)
+	if problem != "":
+		_status.text = problem
 		_status.modulate = MISSING_COLOR
 		return
+	var made: int = recipe.get("count", 1)
 	gathering.play_sound("mine")
 	var item_name: String = Items.get_info(recipe["id"])["name"]
 	_status.text = "Made %s%s!" % ["%d× " % made if made > 1 else "", item_name]

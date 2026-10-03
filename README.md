@@ -120,7 +120,12 @@ regrow, edit `scripts/harvestables.gd`.
 
 ## Crafting
 
-Crafting only works at a **crafting bench**. Put the bench on your hotbar,
+**By hand:** the inventory screen (I / Tab) has a small **Crafting** list
+for the basics: a Crafting Bench, Stone Axe, Stone Pickaxe and Fruit Salad.
+Each shows what it needs (green when you have it) and a **Craft** button.
+
+**At a crafting bench:** everything else (iron tools, smelting, armor and
+accessories) needs a **crafting bench**. Put the bench on your hotbar,
 pick it, and right-click (or press F) to build it in front of you. Walk up to
 it and press **E** or click to open the crafting menu: pick a recipe on the
 left, see what it needs and what you have, and press **Craft**. **Pick Up
@@ -136,7 +141,8 @@ can make more benches.
 | Food | Fruit Salad (2 apples, 4 berries; very filling) |
 
 Benches you build are saved with the world. To add or change recipes, edit
-`scripts/recipes.gd`.
+`scripts/recipes.gd` (give a recipe `"hand": true` to make it craftable from
+the inventory too).
 
 ## Saving
 
