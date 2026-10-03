@@ -5,7 +5,7 @@ extends CanvasLayer
 const SlotScript := preload("res://scripts/inventory_slot.gd")
 const Items := preload("res://scripts/items.gd")
 
-const HINT := "Drag items to move them  •  Right-click to equip / unequip  •  I or Tab to close"
+const HINT := "Drag items to move them  •  Right-click to equip, or to move between bag and hotbar  •  I or Tab to close"
 
 var inventory  # inventory.gd
 var player  # player.gd
@@ -55,7 +55,7 @@ func _on_slot_hovered(ref) -> void:
 	var entry = inventory.get_slot(ref)
 	if entry != null:
 		_info_label.text = Items.describe(entry["id"]).replace("\n", "  •  ")
-	elif ref is int:
+	elif inventory.is_storage(ref):
 		_info_label.text = ""
 	else:
 		_info_label.text = "%s slot (empty)" % inventory.SLOT_LABELS[ref]
@@ -124,6 +124,14 @@ func _build() -> void:
 	bag_box.add_child(grid)
 	for i in inventory.BAG_SIZE:
 		grid.add_child(_make_slot(i))
+	bag_box.add_child(_label("Hotbar (keys 1–8)", 20))
+	var hotbar_row := HBoxContainer.new()
+	hotbar_row.add_theme_constant_override("separation", 6)
+	bag_box.add_child(hotbar_row)
+	for i in inventory.HOTBAR_SIZE:
+		var slot = _make_slot(inventory.hotbar_ref(i))
+		slot.number = str(i + 1)
+		hotbar_row.add_child(slot)
 
 	_info_label = _label("", 17)
 	_info_label.custom_minimum_size.y = 26

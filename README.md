@@ -40,7 +40,9 @@ The game opens on the **main menu**:
 | Mouse | Look around |
 | Shift | Sprint |
 | Space | Jump / swim up |
+| 1–8 / mouse wheel | Pick a hotbar slot (the item goes in your hand) |
 | E / left click (hold) | Chop, mine or pick what's in front of you |
+| F / right click | Eat the food in your hand |
 | I / Tab | Open or close the inventory |
 | F5 | Quick save |
 | Esc | Pause menu (resume, settings, save, quit) |
@@ -67,6 +69,26 @@ right-click an item to equip or unequip it.
 - **Armor slots:** Head, Chest, Hands, Legs, Feet
 - **Accessory slots:** Amulet, two Rings, Charm
 - **Bag:** 24 slots; things like apples and stones stack
+- **Hotbar:** 8 slots, also shown along the bottom of the screen. Press
+  1–8 or scroll the mouse wheel to pick one; that item is held in your hand.
+  Right-click an item in the bag to put it on the hotbar (or back).
+
+## Tools, food and hunger
+
+A new world starts with a **stone axe**, a **stone pickaxe** and some apples
+on the hotbar (older worlds get the two tools added once).
+
+- **Axes** chop trees faster, **pickaxes** break rocks faster. You get the
+  same amount of loot, just in fewer swings. Iron tools are even faster;
+  they exist in `scripts/items.gd`, but there's no crafting to make them yet.
+- **Ore deposits and crystals need a pickaxe** in your hand. Trees, rocks
+  and bushes can also be gathered with bare hands, just slowly.
+- **Hunger** (the orange bar) slowly runs down, twice as fast while
+  sprinting. Hold food on the hotbar and press **F** or right-click to eat
+  (apple +20, berries +8).
+- **Health** (the red bar) comes back on its own while you're at least half
+  full. If hunger runs out, health drains, and at zero you faint and wake up
+  at the world's starting point. You keep all your items.
 
 Worn items show on your character and add up to your stats. Speed and jump
 bonuses already work. Armor is counted, but there's nothing to fight yet. A new
@@ -100,7 +122,8 @@ regrow, edit `scripts/harvestables.gd`.
 Every world has its own save. The game saves automatically every 30 seconds,
 when you quit through the pause menu, and when you close the window. It
 remembers where you are, which way you're looking, the time of day, your
-inventory, and what you've harvested that hasn't grown back yet.
+inventory and hotbar, your health and hunger, and what you've harvested that
+hasn't grown back yet.
 
 Saves live in `%APPDATA%\Godot\app_userdata\Nelbrenn\worlds\` (one `.json`
 file per world) and settings in `settings.cfg` next to that folder. A save
@@ -121,12 +144,14 @@ from before multiple worlds existed is moved in automatically as
 | `scripts/ui.gd` | Shared menu look (colours, buttons, panels) |
 | `scripts/world.gd` | Terrain shape and colours, chunk streaming, trees, rocks, ores, bushes and water |
 | `scripts/harvestables.gd` | What every tree, rock and ore drops, how many hits it takes, regrow times |
-| `scripts/gathering.gd` | Chopping and mining: aiming, the on-screen prompt, pickups and sounds |
+| `scripts/gathering.gd` | Chopping and mining: aiming, tools, the on-screen prompt, pickups and sounds |
+| `scripts/hud.gd` | Hotbar and health / food bars on screen; picking slots and eating |
+| `scripts/vitals.gd` | Health and hunger, eating, and fainting |
 | `scripts/player.gd` | Player movement, swimming and the third-person camera |
 | `scripts/day_night.gd` | Sun movement and sky colours over the day |
 | `scripts/ambience.gd` | Wind sound, made in code, louder up high |
 | `scripts/items.gd` | The list of every item and its stats |
-| `scripts/inventory.gd` | Inventory slots, equipping, stacking and stats |
+| `scripts/inventory.gd` | Inventory and hotbar slots, equipping, stacking and stats |
 | `scripts/inventory_ui.gd` | The inventory screen |
 | `scripts/inventory_slot.gd` | One slot in the inventory screen: icons and drag-and-drop |
 | `scripts/save_game.gd` | Reading, writing, listing and deleting world saves |

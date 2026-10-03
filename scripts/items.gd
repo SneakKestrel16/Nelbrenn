@@ -8,8 +8,27 @@ extends RefCounted
 ## Optional stats: "armor" (points), "speed" and "jump" (percent bonus).
 ## "max_stack" is how many fit in one bag slot (default 1).
 ## "icon" picks the drawn icon shape (defaults to the slot).
+## Tools: "tool" is "axe" or "pickaxe", "power" is how much each hit does
+## (your bare hands do 1). Food: "food" is how much hunger eating it fills.
 
 const ITEMS := {
+	# --- Tools ---
+	"stone_axe": {
+		"name": "Stone Axe", "slot": "", "icon": "axe", "color": Color(0.60, 0.60, 0.58),
+		"tool": "axe", "power": 2, "description": "Chops trees twice as fast as your hands.",
+	},
+	"stone_pickaxe": {
+		"name": "Stone Pickaxe", "slot": "", "icon": "pickaxe", "color": Color(0.60, 0.60, 0.58),
+		"tool": "pickaxe", "power": 2, "description": "Mines rocks and ore. You need a pickaxe for ore.",
+	},
+	"iron_axe": {
+		"name": "Iron Axe", "slot": "", "icon": "axe", "color": Color(0.78, 0.80, 0.84),
+		"tool": "axe", "power": 3, "description": "A sharp iron blade. Trees don't stand a chance.",
+	},
+	"iron_pickaxe": {
+		"name": "Iron Pickaxe", "slot": "", "icon": "pickaxe", "color": Color(0.78, 0.80, 0.84),
+		"tool": "pickaxe", "power": 3, "description": "Bites through stone and ore.",
+	},
 	# --- Armor ---
 	"leather_cap": {
 		"name": "Leather Cap", "slot": "head", "color": Color(0.55, 0.36, 0.20),
@@ -63,11 +82,11 @@ const ITEMS := {
 	# --- Bag-only items ---
 	"apple": {
 		"name": "Apple", "slot": "", "icon": "round", "color": Color(0.85, 0.20, 0.15),
-		"max_stack": 20, "description": "Crunchy and sweet.",
+		"max_stack": 20, "food": 20, "description": "Crunchy and sweet.",
 	},
 	"berries": {
 		"name": "Berries", "slot": "", "icon": "berries", "color": Color(0.80, 0.12, 0.22),
-		"max_stack": 30, "description": "Picked from a berry bush.",
+		"max_stack": 30, "food": 8, "description": "Picked from a berry bush.",
 	},
 	# --- Materials (gathered in the world) ---
 	"wood": {
@@ -125,6 +144,10 @@ static func describe(id: String) -> String:
 		lines.append("Speed %+d%%" % info["speed"])
 	if info.get("jump", 0) != 0:
 		lines.append("Jump %+d%%" % info["jump"])
+	if info.has("tool"):
+		lines.append("%s power %d" % [String(info["tool"]).capitalize(), info.get("power", 1)])
+	if info.get("food", 0) != 0:
+		lines.append("Food +%d (hold it on the hotbar and right-click to eat)" % info["food"])
 	if info.get("description", "") != "":
 		lines.append(info["description"])
 	return "\n".join(lines)

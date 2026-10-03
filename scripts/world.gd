@@ -481,10 +481,10 @@ func find_resource(from: Vector3, forward: Vector3, reach: float) -> Dictionary:
 	return best
 
 
-## One hit on `node` from a player standing at `from`. Returns true if it broke.
-func hit_resource(node: Dictionary, from: Vector3) -> bool:
+## Hits `node` for `damage` from a player standing at `from`. Returns true if it broke.
+func hit_resource(node: Dictionary, from: Vector3, damage := 1) -> bool:
 	var info := Harvestables.get_info(node["kind"])
-	node["hp"] -= 1
+	node["hp"] -= damage
 	spawn_chips(node["pos"] + Vector3.UP * (1.2 if node["tree"] else 0.5), info["chips"])
 	if node["hp"] > 0:
 		_animate(node, "shake", from)

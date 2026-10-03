@@ -8,7 +8,14 @@ const Items := preload("res://scripts/items.gd")
 const SIZE := 64.0
 
 var inventory  # inventory.gd
-var ref  # int for a bag slot, String for an equipment slot
+var ref  # int for a bag slot, String for a hotbar or equipment slot
+## Small number drawn in the corner (hotbar keys).
+var number := ""
+## Drawn with a bright frame (the hotbar slot in your hand).
+var selected := false:
+	set(value):
+		selected = value
+		queue_redraw()
 
 var _count_label: Label
 var _hover := false
@@ -93,21 +100,24 @@ func _notification(what: int) -> void:
 
 func _draw() -> void:
 	var rect := Rect2(Vector2.ZERO, size)
-	var bg := Color(0.13, 0.12, 0.11, 0.92) if ref is int else Color(0.17, 0.14, 0.10, 0.92)
+	var bg := Color(0.13, 0.12, 0.11, 0.92) if inventory.is_storage(ref) else Color(0.17, 0.14, 0.10, 0.92)
 	draw_rect(rect, bg)
 	var border := Color(0.45, 0.40, 0.32)
 	if _drop_ok:
 		border = Color(0.45, 0.85, 0.40)
-	elif _hover:
+	elif _hover or selected:
 		border = Color(0.95, 0.85, 0.55)
-	draw_rect(rect.grow(-1.0), border, false, 2.0)
+	draw_rect(rect.grow(-1.0), border, false, 4.0 if selected else 2.0)
 
 	var entry = inventory.get_slot(ref)
 	if entry != null:
 		draw_icon(self, entry["id"], "", rect)
-	elif not ref is int:
+	elif not inventory.is_storage(ref):
 		# Faint outline of what belongs here.
 		draw_icon(self, "", inventory.slot_type(ref), rect)
+	if number != "":
+		draw_string(get_theme_default_font(), Vector2(5, 16), number, HORIZONTAL_ALIGNMENT_LEFT, -1, 13,
+				Color(1, 1, 1, 0.9 if selected else 0.5))
 
 
 ## Draws a simple shape for an item (or a faint placeholder for an empty slot type).
@@ -163,6 +173,15 @@ static func draw_icon(canvas: CanvasItem, id: String, placeholder: String, rect:
 		"rock":
 			canvas.draw_colored_polygon(p.call([Vector2(0.15, 0.85), Vector2(0.05, 0.5), Vector2(0.3, 0.2),
 					Vector2(0.65, 0.15), Vector2(0.95, 0.45), Vector2(0.85, 0.85)]), color)
+		"axe", "pickaxe":
+			var wood := Color(0.55, 0.38, 0.22)
+			canvas.draw_line(o + Vector2(0.2, 0.95) * s, o + Vector2(0.72, 0.15) * s, wood, 0.1 * s)
+			if shape == "axe":
+				canvas.draw_colored_polygon(p.call([Vector2(0.55, 0.12), Vector2(0.95, 0.05), Vector2(1.0, 0.5),
+						Vector2(0.72, 0.42)]), color)
+			else:
+				canvas.draw_colored_polygon(p.call([Vector2(0.2, 0.12), Vector2(0.62, 0.02), Vector2(1.0, 0.25),
+						Vector2(0.98, 0.42), Vector2(0.68, 0.24), Vector2(0.3, 0.28)]), color)
 		"lump":
 			canvas.draw_colored_polygon(p.call([Vector2(0.2, 0.85), Vector2(0.08, 0.55), Vector2(0.25, 0.25),
 					Vector2(0.55, 0.18), Vector2(0.9, 0.35), Vector2(0.92, 0.7), Vector2(0.7, 0.9)]), color)

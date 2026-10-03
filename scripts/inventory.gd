@@ -1,9 +1,11 @@
 extends Node
-## The player's items: a bag of BAG_SIZE slots plus equipment slots for
+## The player's items: a bag of BAG_SIZE slots, a hotbar of HOTBAR_SIZE slots
+## (the item picked there is the one in your hand), plus equipment slots for
 ## armor and accessories.
 ##
-## A slot is referred to by a "ref": an int for a bag slot (0 to BAG_SIZE - 1)
-## or a String for an equipment slot ("head", "ring_1", ...).
+## A slot is referred to by a "ref": an int for a bag slot (0 to BAG_SIZE - 1),
+## "hotbar_0" to "hotbar_7" for the hotbar, or the name of an equipment slot
+## ("head", "ring_1", ...).
 ## Each filled slot holds {"id": item id, "count": how many}; empty slots hold null.
 
 signal changed
@@ -11,15 +13,20 @@ signal changed
 const Items := preload("res://scripts/items.gd")
 
 const BAG_SIZE := 24
+const HOTBAR_SIZE := 8
 const ARMOR_SLOTS: Array[String] = ["head", "chest", "hands", "legs", "feet"]
 const ACCESSORY_SLOTS: Array[String] = ["neck", "ring_1", "ring_2", "charm"]
 const SLOT_LABELS := {
 	"head": "Head", "chest": "Chest", "hands": "Hands", "legs": "Legs", "feet": "Feet",
 	"neck": "Amulet", "ring_1": "Ring", "ring_2": "Ring", "charm": "Charm",
 }
+const STARTER_TOOLS: Array[String] = ["stone_axe", "stone_pickaxe"]
 
 var bag: Array = []
+var hotbar: Array = []
 var equipment := {}
+## The hotbar slot in your hand (0 to HOTBAR_SIZE - 1).
+var selected := 0
 
 
 func _init() -> void:
@@ -29,23 +36,43 @@ func _init() -> void:
 func clear() -> void:
 	bag.clear()
 	bag.resize(BAG_SIZE)
+	hotbar.clear()
+	hotbar.resize(HOTBAR_SIZE)
+	selected = 0
 	equipment.clear()
 	for slot in ARMOR_SLOTS + ACCESSORY_SLOTS:
 		equipment[slot] = null
 
 
+static func hotbar_ref(index: int) -> String:
+	return "hotbar_%d" % index
+
+
+static func is_hotbar(ref) -> bool:
+	return ref is String and ref.begins_with("hotbar_")
+
+
+## Bag and hotbar slots take any item; equipment slots only take what's worn there.
+static func is_storage(ref) -> bool:
+	return ref is int or is_hotbar(ref)
+
+
 func get_slot(ref) -> Variant:
-	return bag[ref] if ref is int else equipment.get(ref)
+	if ref is int:
+		return bag[ref]
+	if is_hotbar(ref):
+		return hotbar[int(ref.trim_prefix("hotbar_"))]
+	return equipment.get(ref)
 
 
 ## Which kind of item an equipment slot takes ("ring_1" and "ring_2" both take "ring").
 static func slot_type(ref) -> String:
-	return "" if ref is int else String(ref).trim_suffix("_1").trim_suffix("_2")
+	return "" if is_storage(ref) else String(ref).trim_suffix("_1").trim_suffix("_2")
 
 
 ## Whether `entry` is allowed to sit in slot `ref`.
 func can_hold(ref, entry) -> bool:
-	if entry == null or ref is int:
+	if entry == null or is_storage(ref):
 		return true
 	return Items.get_info(entry["id"]).get("slot", "") == slot_type(ref) and entry["count"] == 1
 
@@ -74,7 +101,8 @@ func move(from, to) -> bool:
 	return true
 
 
-## Right-click: equip an item from the bag, or put an equipped item back in the bag.
+## Right-click: equip an item from the bag (or put tools and food on the
+## hotbar), or put an equipped or hotbar item back in the bag.
 func quick_move(ref) -> bool:
 	var entry = get_slot(ref)
 	if entry == null:
@@ -84,7 +112,11 @@ func quick_move(ref) -> bool:
 		return free != -1 and move(ref, free)
 	var wanted: String = Items.get_info(entry["id"]).get("slot", "")
 	if wanted == "":
-		return false
+		for i in HOTBAR_SIZE:  # Top up a matching stack first, then an empty slot.
+			if _can_stack(ref, hotbar_ref(i)):
+				return move(ref, hotbar_ref(i))
+		var empty := hotbar.find(null)
+		return empty != -1 and move(ref, hotbar_ref(empty))
 	var targets: Array = [wanted] if equipment.has(wanted) else [wanted + "_1", wanted + "_2"]
 	for target in targets:  # Prefer an empty slot, otherwise swap with the first.
 		if equipment[target] == null:
@@ -92,36 +124,72 @@ func quick_move(ref) -> bool:
 	return move(ref, targets[0])
 
 
-## Puts items in the bag, filling existing stacks first. Returns how many didn't fit.
+## Puts items away: first onto matching stacks (hotbar, then bag), then into
+## empty bag slots, then empty hotbar slots. Returns how many didn't fit.
 func add_item(id: String, count := 1) -> int:
 	if not Items.exists(id):
 		push_warning("Unknown item: %s" % id)
 		return count
 	var limit := Items.max_stack(id)
-	for i in BAG_SIZE:
-		if count > 0 and bag[i] != null and bag[i]["id"] == id and bag[i]["count"] < limit:
-			var added := mini(count, limit - bag[i]["count"])
-			bag[i]["count"] += added
-			count -= added
-	for i in BAG_SIZE:
-		if count > 0 and bag[i] == null:
-			var added := mini(count, limit)
-			bag[i] = {"id": id, "count": added}
-			count -= added
+	for list in [hotbar, bag]:
+		for i in list.size():
+			if count > 0 and list[i] != null and list[i]["id"] == id and list[i]["count"] < limit:
+				var added := mini(count, limit - list[i]["count"])
+				list[i]["count"] += added
+				count -= added
+	for list in [bag, hotbar]:
+		for i in list.size():
+			if count > 0 and list[i] == null:
+				var added := mini(count, limit)
+				list[i] = {"id": id, "count": added}
+				count -= added
 	changed.emit()
 	return count
 
 
-## How many more of `id` fit in the bag.
+## How many more of `id` fit in the bag and hotbar.
 func room_for(id: String) -> int:
 	var limit := Items.max_stack(id)
 	var room := 0
-	for entry in bag:
+	for entry in hotbar + bag:
 		if entry == null:
 			room += limit
 		elif entry["id"] == id:
 			room += limit - entry["count"]
 	return room
+
+
+## How many of `id` you're carrying (bag and hotbar).
+func count_of(id: String) -> int:
+	var n := 0
+	for entry in hotbar + bag:
+		if entry != null and entry["id"] == id:
+			n += entry["count"]
+	return n
+
+
+func select(index: int) -> void:
+	index = posmod(index, HOTBAR_SIZE)
+	if index != selected:
+		selected = index
+		changed.emit()
+
+
+## The id of the item in your hand, or "" for an empty hand.
+func selected_id() -> String:
+	var entry = hotbar[selected]
+	return "" if entry == null else entry["id"]
+
+
+## Uses up one of the item in your hand (eating, for example).
+func consume_selected() -> void:
+	var entry = hotbar[selected]
+	if entry == null:
+		return
+	entry["count"] -= 1
+	if entry["count"] <= 0:
+		hotbar[selected] = null
+	changed.emit()
 
 
 func equip_new(id: String) -> void:
@@ -155,15 +223,19 @@ func give_starter_items() -> void:
 	clear()
 	equip_new("leather_tunic")
 	equip_new("leather_boots")
+	_give_starter_tools()
+	hotbar[2] = {"id": "apple", "count": 5}
 	for id in ["leather_cap", "iron_helm", "chainmail", "leather_gloves", "leather_trousers",
 			"swift_boots", "amber_amulet", "silver_ring", "ruby_ring", "feather_charm"]:
 		add_item(id)
-	add_item("apple", 5)
 	add_item("stone", 12)
 
 
 func get_save_data() -> Dictionary:
-	return {"bag": bag.duplicate(true), "equipment": equipment.duplicate(true)}
+	return {
+		"bag": bag.duplicate(true), "hotbar": hotbar.duplicate(true),
+		"equipment": equipment.duplicate(true), "selected": selected,
+	}
 
 
 func apply_save_data(data: Dictionary) -> void:
@@ -171,13 +243,28 @@ func apply_save_data(data: Dictionary) -> void:
 	var saved_bag: Array = data.get("bag", [])
 	for i in mini(saved_bag.size(), BAG_SIZE):
 		bag[i] = _load_entry(saved_bag[i])
+	var saved_hotbar: Array = data.get("hotbar", [])
+	for i in mini(saved_hotbar.size(), HOTBAR_SIZE):
+		hotbar[i] = _load_entry(saved_hotbar[i])
+	selected = posmod(int(data.get("selected", 0)), HOTBAR_SIZE)
 	var saved_equipment: Dictionary = data.get("equipment", {})
 	for slot in equipment:
 		var entry = _load_entry(saved_equipment.get(slot))
 		equipment[slot] = entry if can_hold(slot, entry) else null
 		if entry != null and equipment[slot] == null:
 			add_item(entry["id"], entry["count"])
+	if not data.has("hotbar"):
+		_give_starter_tools()  # Saves from before the hotbar existed get the starter tools too.
 	changed.emit()
+
+
+func _give_starter_tools() -> void:
+	for id in STARTER_TOOLS:
+		var empty := hotbar.find(null)
+		if empty != -1:
+			hotbar[empty] = {"id": id, "count": 1}
+		else:
+			add_item(id)
 
 
 ## Turns a saved slot back into an entry, skipping items that no longer exist.
@@ -190,6 +277,8 @@ func _load_entry(saved) -> Variant:
 func _set_slot(ref, entry) -> void:
 	if ref is int:
 		bag[ref] = entry
+	elif is_hotbar(ref):
+		hotbar[int(ref.trim_prefix("hotbar_"))] = entry
 	else:
 		equipment[ref] = entry
 
@@ -197,7 +286,7 @@ func _set_slot(ref, entry) -> void:
 func _can_stack(from, to) -> bool:
 	var a = get_slot(from)
 	var b = get_slot(to)
-	return (to is int and a != null and b != null and a["id"] == b["id"]
+	return (is_storage(to) and a != null and b != null and a["id"] == b["id"]
 			and b["count"] < Items.max_stack(b["id"]))
 
 

@@ -11,6 +11,9 @@ const InventoryUIScript := preload("res://scripts/inventory_ui.gd")
 const PauseMenuScript := preload("res://scripts/pause_menu.gd")
 const AmbienceScript := preload("res://scripts/ambience.gd")
 const GatheringScript := preload("res://scripts/gathering.gd")
+const VitalsScript := preload("res://scripts/vitals.gd")
+const HudScript := preload("res://scripts/hud.gd")
+const Items := preload("res://scripts/items.gd")
 
 @export var autosave_seconds := 30.0
 
@@ -24,6 +27,7 @@ var day_night  # day_night.gd
 var inventory  # inventory.gd
 var inventory_ui  # inventory_ui.gd
 var pause_menu  # pause_menu.gd
+var vitals  # vitals.gd
 
 var _sun: DirectionalLight3D
 var _save_info := {}  # The world's name and dates, kept when saving.
@@ -95,6 +99,22 @@ func _ready() -> void:
 	else:
 		inventory.give_starter_items()
 
+	vitals = VitalsScript.new()
+	vitals.name = "Vitals"
+	vitals.player = player
+	vitals.world = world
+	vitals.game = self
+	if save.has("vitals"):
+		vitals.apply_save_data(save["vitals"])
+	add_child(vitals)
+
+	var hud := HudScript.new()
+	hud.name = "HUD"
+	hud.inventory = inventory
+	hud.player = player
+	hud.vitals = vitals
+	add_child(hud)
+
 	inventory_ui = InventoryUIScript.new()
 	inventory_ui.name = "InventoryUI"
 	inventory_ui.inventory = inventory
@@ -158,6 +178,7 @@ func save_game(announce: bool) -> void:
 		"player": player.get_save_data(),
 		"inventory": inventory.get_save_data(),
 		"world": world.get_save_data(),
+		"vitals": vitals.get_save_data(),
 		"saved_at": Time.get_datetime_string_from_system(),
 	}, true)
 	var ok: bool = SaveGame.write(world_id, data)
@@ -172,8 +193,11 @@ func _apply_settings() -> void:
 	_sun.shadow_enabled = Settings.get_value("graphics", "shadows") > 0
 
 
-## Worn equipment changes how the player looks, runs and jumps.
+## Worn equipment changes how the player looks, runs and jumps, and the
+## picked hotbar item shows in their hand.
 func _on_inventory_changed() -> void:
+	var held: String = inventory.selected_id()
+	player.set_held(held, Items.get_info(held))
 	var stats: Dictionary = inventory.get_stats()
 	player.speed_bonus = stats["speed"]
 	player.jump_bonus = stats["jump"]

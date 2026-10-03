@@ -63,9 +63,26 @@ func _wants_gather() -> bool:
 			or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 
 
+## How hard a hit on `node` is with what's in your hand: the tool's power if
+## it's the right tool, 1 for bare hands (or the wrong tool), or 0 if it
+## can't be gathered without the right tool.
+func _damage(node: Dictionary) -> int:
+	var info := Harvestables.get_info(node["kind"])
+	var held := Items.get_info(inventory.selected_id())
+	if info.get("tool", "") != "" and held.get("tool", "") == info["tool"]:
+		return int(held.get("power", 1))
+	return 0 if info.get("needs_tool", false) else 1
+
+
 func _hit(node: Dictionary) -> void:
 	var info := Harvestables.get_info(node["kind"])
 	var main := Harvestables.main_item(node["kind"])
+	var damage := _damage(node)
+	if damage == 0:
+		if _full_cooldown <= 0.0:
+			_full_cooldown = 2.5
+			game.show_message("You need a %s for that. Pick one on your hotbar (1–8)." % info["tool"])
+		return
 	if main != "" and inventory.room_for(main) <= 0:
 		_bag_full()
 		return
@@ -75,8 +92,9 @@ func _hit(node: Dictionary) -> void:
 	_audio.pitch_scale = _rng.randf_range(0.88, 1.12)
 	_audio.play()
 
-	var broke: bool = world.hit_resource(node, player.global_position)
-	var drops := Harvestables.roll(info["per_hit"], _rng)
+	var dealt := mini(damage, node["hp"])  # So a tool gets you there faster, not less loot.
+	var broke: bool = world.hit_resource(node, player.global_position, damage)
+	var drops := Harvestables.roll(info["per_hit"], _rng, dealt)
 	if broke:
 		var extra := Harvestables.roll(info["on_break"], _rng)
 		for id in extra:
@@ -105,7 +123,12 @@ func _update_prompt() -> void:
 		return
 	var info := Harvestables.get_info(_target["kind"])
 	var key := Settings.key_name(Settings.get_binding("gather", 0)) if InputMap.has_action("gather") else "—"
-	_prompt_label.text = "[%s]  %s %s" % ["Click" if key == "—" else key, info["action"], info["name"]]
+	if _damage(_target) == 0:
+		_prompt_label.text = "%s  •  needs a %s" % [info["name"], info["tool"]]
+		_prompt_label.modulate = Color(1.0, 0.6, 0.5)
+	else:
+		_prompt_label.text = "[%s]  %s %s" % ["Click" if key == "—" else key, info["action"], info["name"]]
+		_prompt_label.modulate = Color.WHITE
 	_hp_bar.visible = info["hits"] > 1
 	_hp_bar.max_value = info["hits"]
 	_hp_bar.value = _target["hp"]
@@ -132,7 +155,7 @@ func _add_to_feed(id: String, count: int) -> void:
 	var line: Dictionary = _feed_lines[id]
 	line["count"] += count
 	line["time"] = FEED_SECONDS
-	line["label"].text = "+%d %s  (%d)" % [line["count"], Items.get_info(id)["name"], _total(id)]
+	line["label"].text = "+%d %s  (%d)" % [line["count"], Items.get_info(id)["name"], inventory.count_of(id)]
 	line["row"].modulate.a = 1.0
 
 
@@ -144,15 +167,6 @@ func _update_feed(delta: float) -> void:
 		if line["time"] <= 0.0:
 			line["row"].queue_free()
 			_feed_lines.erase(id)
-
-
-## How many of `id` are in the bag altogether.
-func _total(id: String) -> int:
-	var n := 0
-	for entry in inventory.bag:
-		if entry != null and entry["id"] == id:
-			n += entry["count"]
-	return n
 
 
 func _build_ui() -> void:

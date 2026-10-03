@@ -22,6 +22,8 @@ var _camera_yaw: Node3D
 var _camera_pitch: Node3D
 var _camera: Camera3D
 var _model: Node3D
+var _held: Node3D  ## The item in the player's hand.
+var _held_id := ""
 
 
 func _ready() -> void:
@@ -37,6 +39,10 @@ func _ready() -> void:
 	_model.material_override = LowPoly.make_material()
 	set_look({})
 	add_child(_model)
+	_held = Node3D.new()
+	_held.position = Vector3(0.45, 0.95, -0.15)  # Right hand (the model faces -Z).
+	_held.rotation.x = -0.5
+	_model.add_child(_held)
 
 	_camera_yaw = Node3D.new()
 	_camera_yaw.position.y = 1.6
@@ -141,6 +147,51 @@ func swing_at(pos: Vector3) -> void:
 	var tween := create_tween()
 	tween.tween_property(_model, "rotation:x", -0.35, 0.08)
 	tween.tween_property(_model, "rotation:x", 0.0, 0.18)
+
+
+## Raises the held food to the mouth.
+func eat_animation() -> void:
+	var tween := create_tween()
+	tween.tween_property(_held, "position", Vector3(0.15, 1.6, -0.35), 0.12)
+	tween.tween_property(_held, "position", Vector3(0.45, 0.95, -0.15), 0.2).set_delay(0.15)
+
+
+## Shows item `id` (from items.gd) in the player's hand, or nothing for "".
+func set_held(id: String, info: Dictionary) -> void:
+	if id == _held_id:
+		return
+	_held_id = id
+	for child in _held.get_children():
+		child.queue_free()
+	if id == "":
+		return
+	var color: Color = info.get("color", Color.WHITE)
+	var wood := Color(0.50, 0.34, 0.20)
+	match info.get("tool", ""):
+		"axe":
+			_held_part(func(st): LowPoly.add_cylinder(st, 0.035, 0.04, 0.8, 5, Vector3.ZERO, wood), Vector3(0, 0.25, 0), 0.0)
+			# Blade: a wedge sticking out forward near the top.
+			_held_part(func(st): LowPoly.add_cylinder(st, 0.15, 0.04, 0.28, 4, Vector3.ZERO, color), Vector3(0, 0.55, -0.14), -PI / 2)
+		"pickaxe":
+			_held_part(func(st): LowPoly.add_cylinder(st, 0.035, 0.04, 0.8, 5, Vector3.ZERO, wood), Vector3(0, 0.25, 0), 0.0)
+			# Head: two spikes, one pointing forward and one back.
+			_held_part(func(st): LowPoly.add_cylinder(st, 0.0, 0.06, 0.32, 4, Vector3.ZERO, color), Vector3(0, 0.62, -0.16), -PI / 2)
+			_held_part(func(st): LowPoly.add_cylinder(st, 0.0, 0.06, 0.32, 4, Vector3.ZERO, color), Vector3(0, 0.62, 0.16), PI / 2)
+		_:
+			_held_part(func(st): LowPoly.add_blob(st, 0.12, Vector3.ZERO, color, 7), Vector3(0, 0.08, 0), 0.0)
+
+
+## One piece of the held item, built by `build` and tipped over by `tilt` around X.
+func _held_part(build: Callable, pos: Vector3, tilt: float) -> void:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	build.call(st)
+	var part := MeshInstance3D.new()
+	part.mesh = st.commit()
+	part.material_override = _model.material_override
+	part.position = pos
+	part.rotation.x = tilt
+	_held.add_child(part)
 
 
 func get_save_data() -> Dictionary:
